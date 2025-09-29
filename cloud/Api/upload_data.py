@@ -5,23 +5,22 @@ from datetime import datetime
 
 def lambda_handler(event, context):
     url = os.environ.get("FROST_SERVER_URL")
-
     if not url:
         return {
             "statusCode": 500,
             "body": json.dumps({"error": "FROST_SERVER_URL not set"})
         }
 
+    # parse body
     try:
-        body = json.loads(event['body'])
-        datastream = requests.get(url + f"Datastreams{body['datastream_id']}").json()
+        body = json.loads(event["body"])
     except Exception:
         return {
             "statusCode": 400,
             "body": json.dumps({"error": "Invalid JSON body"})
         }
 
-    # ตรวจสอบ required fields
+    # validate required fields
     if "datastream_id" not in body:
         return {
             "statusCode": 400,
@@ -32,30 +31,18 @@ def lambda_handler(event, context):
             "statusCode": 400,
             "body": json.dumps({"error": "'result' is required"})
         }
+    if "FeatureOfInterest" not in body:
+        return {
+            "statusCode": 400,
+            "body": json.dumps({"error": "'FeatureOfInterest' is required"})
+        }
 
-    # สร้าง observation object
-    observation = {
-        "result": body["result"],
-        "Datastream": { "@iot.id": body["datastream_id"] },
-        "phenomenonTime": body.get("phenomenonTime", datetime.utcnow().isoformat() + "Z")
-    }
+    datastream_id = body["datastream_id"]
 
-    # Optional: FeatureOfInterest
-    if "foi_id" in body:
-        observation["FeatureOfInterest"] = { "@iot.id": body["foi_id"] }
-
+    # Check Datastream 
     try:
-        resp = requests.post(
-            url + "Observations",
-            json=observation,
-            timeout=10
-        )
-        if resp.status_code in (200, 201):
-            return {
-                "statusCode": 201,
-                "body": resp.text  # return response จาก FROST
-            }
-        else:
+        resp = requests.get(f"{url}Datastreams({datastream_id})", timeout=10)
+        if resp.status_code != 200:
             return {
                 "statusCode": resp.status_code,
                 "body": resp.text
@@ -63,7 +50,32 @@ def lambda_handler(event, context):
     except Exception as e:
         return {
             "statusCode": 500,
-            "body": json.dumps({"error": str(e)})
+            "body": json.dumps({"error": f"Failed to get Datastream: {str(e)}"})
         }
 
-# TODO : Optimize upload feature
+    # TODO: Validate body['result] before POST to FROST
+    # TODO: Make it easy for front end to use
+
+    # build observation
+    observation = {
+        "result": body["result"],
+        "phenomenonTime": body.get("phenomenonTime", datetime.utcnow().isoformat() + "Z"),
+        "FeatureOfInterest": body["FeatureOfInterest"]
+    }
+
+    # POST observation
+    try:
+        post_resp = requests.post(
+            f"{url}Datastreams({datastream_id})/Observations",
+            json=observation,
+            timeout=10
+        )
+        return {
+            "statusCode": post_resp.status_code,
+            "body": post_resp.text
+        }
+    except Exception as e:
+        return {
+            "statusCode": 500,
+            "body": json.dumps({"error": str(e)})
+        }
