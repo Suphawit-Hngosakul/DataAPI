@@ -1,96 +1,71 @@
 import React, { useState, useEffect, useMemo } from 'react'
-import { Database, FileText, Filter, Eye } from 'lucide-react'
+import { Database, FileText, Filter, Eye, Copy, Check } from 'lucide-react'
 
-// Mock API functions
-const mockApi = {
-  async fetchData(projectName) {
-    // Simulate API delay
-    await new Promise(resolve => setTimeout(resolve, 500));
-
-    const mockData = [
-      {
-        species: ["Bird1", "Bird2"],
-        DATE: "20250830_2355",
-        location: "13.933667182922, 99.763458251953",
-        DEVICE: "ESP32-02",
-        files: ["20250830_2355_ESP32-02_13.933667182922,99.763458251953.wav", "20250830_2355_ESP32-02_13.933667182922,99.763458251953.json"],
-        temperature_c: 28.5275,
-        humidity: 78.30472,
-        light: 4095.0
-      },
-      {
-        species: ["Bird3"],
-        DATE: "20250830_2320",
-        location: "13.923445123456, 99.753421654321",
-        DEVICE: "ESP32-01",
-        files: ["20250830_2320_ESP32-01_13.923445123456,99.753421654321.wav", "20250830_2320_ESP32-01_13.923445123456,99.753421654321.json"],
-        temperature_c: 27.8421,
-        humidity: 76.52341,
-        light: 3876.5
-      },
-      {
-        species: [],
-        DATE: "20250830_2145",
-        location: "13.945678901234, 99.776543210987",
-        DEVICE: "ESP32-03",
-        files: ["20250830_2145_ESP32-03_13.945678901234,99.776543210987.wav"],
-        temperature_c: 29.1234,
-        humidity: 79.87654,
-        light: 4090.2
-      },
-      {
-        species: ["Bird1", "Bird4", "Bird5"],
-        DATE: "20250830_2100",
-        location: "13.912345678901, 99.743210987654",
-        DEVICE: "ESP32-02",
-        files: ["20250830_2100_ESP32-02_13.912345678901,99.743210987654.wav", "20250830_2100_ESP32-02_13.912345678901,99.743210987654.json"],
-        temperature_c: 26.9876,
-        humidity: 74.12345,
-        light: 3999.8
-      },
-      {
-        species: ["Bird2"],
-        DATE: "20250830_2030",
-        location: "13.934567890123, 99.765432109876",
-        DEVICE: "ESP32-01",
-        files: ["20250830_2030_ESP32-01_13.934567890123,99.765432109876.wav", "20250830_2030_ESP32-01_13.934567890123,99.765432109876.json"],
-        temperature_c: 28.2109,
-        humidity: 77.65432,
-        light: 4023.7
+// API functions
+const api = {
+  async fetchData(apiUrl) {
+    try {
+      const response = await fetch(apiUrl);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
       }
-    ];
-
-    return mockData;
+      
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error('Error fetching data:', error);
+      throw error;
+    }
   },
 
   async fetchFiles(projectName) {
-    await new Promise(resolve => setTimeout(resolve, 300));
-
-    return [
-      { name: 'data.csv', size: '2.5 MB', type: 'CSV', lastModified: '2024-01-15' },
-      { name: 'report.pdf', size: '1.2 MB', type: 'PDF', lastModified: '2024-01-14' },
-      { name: 'config.json', size: '45 KB', type: 'JSON', lastModified: '2024-01-13' },
-      { name: 'backup.zip', size: '15.8 MB', type: 'ZIP', lastModified: '2024-01-12' },
-    ]
+    try {
+      const response = await fetch(`http://localhost:8080/api/getfiles/${projectName}`);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error('Error fetching files:', error);
+      return [];
+    }
   }
 }
 
-const ApiInfo = ({ projectName }) => {
+const ApiInfo = ({ apiUrl }) => {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(apiUrl);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
   return (
     <div className="bg-purple-50 p-4 rounded-lg mb-6">
       <h2 className="text-sm font-medium text-purple-800 mb-2">DATA API</h2>
-      <div className="flex items-center space-x-2 text-sm text-gray-600">
-        <span className="font-medium">API:</span>
-        <span className="bg-white px-2 py-1 rounded border text-xs">
-          localhost:8080/api/getdata/{projectName}
-        </span>
+      <div className="flex items-center space-x-2">
+        <span className="font-medium text-sm text-gray-600">API:</span>
+        <div className="flex-1 bg-white px-3 py-2 rounded border text-xs font-mono break-all">
+          {apiUrl}
+        </div>
+        <button
+          onClick={handleCopy}
+          className="px-3 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 transition-colors flex items-center space-x-1 flex-shrink-0"
+        >
+          {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+          <span className="text-xs">{copied ? 'คัดลอกแล้ว' : 'คัดลอก'}</span>
+        </button>
       </div>
     </div>
   )
 }
 
-// Enhanced Filter Component with click-to-filter for non-dropdown values
-const FilterComponent = ({ filters, activeFilters, onFilterChange, onClearFilters, data, onValueClick }) => {
+const FilterComponent = ({ filters, activeFilters, onFilterChange, onClearFilters, onValueClick }) => {
   const hasActiveFilters = Object.values(activeFilters).some(value => value !== '');
 
   return (
@@ -110,7 +85,6 @@ const FilterComponent = ({ filters, activeFilters, onFilterChange, onClearFilter
         )}
       </div>
       
-      {/* Dropdown Filters */}
       {Object.keys(filters).length > 0 && (
         <div className="mb-4">
           <h4 className="text-xs text-gray-500 uppercase tracking-wider mb-2">ตัวกรองแบบเลือก</h4>
@@ -138,7 +112,6 @@ const FilterComponent = ({ filters, activeFilters, onFilterChange, onClearFilter
         </div>
       )}
 
-      {/* Click-to-filter hint */}
       <div className="text-xs text-gray-500 bg-blue-50 p-2 rounded border-l-2 border-blue-200">
         💡 เคล็ดลับ: คลิกที่ข้อมูลในตารางเพื่อกรองตามค่านั้น (Click on table values to filter by that value)
       </div>
@@ -153,7 +126,7 @@ const FilterComponent = ({ filters, activeFilters, onFilterChange, onClearFilter
 }
 
 const DataTable = ({ data, loading, onValueClick }) => {
-  const [viewMode, setViewMode] = useState('data'); // 'data' or 'summary'
+  const [viewMode, setViewMode] = useState('data');
 
   if (loading) {
     return (
@@ -179,9 +152,12 @@ const DataTable = ({ data, loading, onValueClick }) => {
   }
 
   const renderCellValue = (value, column) => {
-    // Non-dropdown columns that should be clickable for filtering
     const clickableColumns = ['location', 'temperature_c', 'humidity', 'light', 'DATE', 'files'];
     const isClickable = clickableColumns.includes(column);
+
+    if (value === null || value === undefined) {
+      return <span className="text-gray-400 italic">ไม่มีข้อมูล</span>;
+    }
 
     if (Array.isArray(value)) {
       if (value.length === 0) {
@@ -189,7 +165,6 @@ const DataTable = ({ data, loading, onValueClick }) => {
       }
       
       if (column === 'species') {
-        // Species is dropdown-filterable, show as badges
         return (
           <div className="flex flex-wrap gap-1">
             {value.map((item, idx) => (
@@ -200,7 +175,6 @@ const DataTable = ({ data, loading, onValueClick }) => {
           </div>
         )
       } else if (isClickable) {
-        // Files or other arrays - clickable for filtering
         return (
           <div className="text-xs space-y-1">
             {value.map((file, idx) => (
@@ -218,7 +192,7 @@ const DataTable = ({ data, loading, onValueClick }) => {
       }
     }
 
-    if (column === 'location' && isClickable) {
+    if (column === 'location' && isClickable && typeof value === 'string') {
       const coords = value.split(', ');
       return (
         <button
@@ -227,7 +201,7 @@ const DataTable = ({ data, loading, onValueClick }) => {
           title={`คลิกเพื่อกรองตาม: ${value}`}
         >
           <div>Lat: {coords[0]}</div>
-          <div>Lng: {coords[1]}</div>
+          <div>Lng: {coords[1] || '-'}</div>
         </button>
       )
     }
@@ -256,17 +230,15 @@ const DataTable = ({ data, loading, onValueClick }) => {
       )
     }
 
-    // For non-clickable values or dropdown columns
     if (typeof value === 'number') {
       return value.toFixed(2);
     }
 
-    return value
+    return String(value);
   }
 
   const columns = Object.keys(data[0]);
 
-  // Summary statistics
   const getSummaryStats = () => {
     const numericColumns = columns.filter(col => 
       data.some(row => typeof row[col] === 'number')
@@ -274,6 +246,8 @@ const DataTable = ({ data, loading, onValueClick }) => {
     
     return numericColumns.map(col => {
       const values = data.map(row => row[col]).filter(val => typeof val === 'number');
+      if (values.length === 0) return null;
+      
       return {
         column: col,
         count: values.length,
@@ -281,7 +255,7 @@ const DataTable = ({ data, loading, onValueClick }) => {
         max: Math.max(...values),
         avg: values.reduce((a, b) => a + b, 0) / values.length
       };
-    });
+    }).filter(stat => stat !== null);
   };
 
   return (
@@ -330,7 +304,7 @@ const DataTable = ({ data, loading, onValueClick }) => {
               <tr>
                 {columns.map(column => (
                   <th key={column} className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    {column.replace('_', ' ')}
+                    {column.replace(/_/g, ' ')}
                     {['location', 'temperature_c', 'humidity', 'light', 'DATE', 'files'].includes(column) && (
                       <span className="ml-1 text-blue-400" title="คลิกข้อมูลในคอลัมน์นี้เพื่อกรอง">🔍</span>
                     )}
@@ -357,7 +331,7 @@ const DataTable = ({ data, loading, onValueClick }) => {
               {getSummaryStats().map((stat, idx) => (
                 <div key={idx} className="p-4 bg-gray-50 rounded-lg">
                   <h5 className="font-medium text-sm text-gray-700 mb-2 capitalize">
-                    {stat.column.replace('_', ' ')}
+                    {stat.column.replace(/_/g, ' ')}
                   </h5>
                   <div className="space-y-1 text-xs text-gray-600">
                     <div>จำนวน: {stat.count}</div>
@@ -375,7 +349,6 @@ const DataTable = ({ data, loading, onValueClick }) => {
   )
 }
 
-// Enhanced File Table Component
 const FileTable = ({ files, loading }) => {
   if (loading) {
     return (
@@ -388,6 +361,14 @@ const FileTable = ({ files, loading }) => {
             ))}
           </div>
         </div>
+      </div>
+    )
+  }
+
+  if (files.length === 0) {
+    return (
+      <div className="bg-white rounded-lg shadow mt-6 p-6 text-center text-gray-500">
+        ไม่พบไฟล์ (No files found)
       </div>
     )
   }
@@ -451,118 +432,141 @@ const FileTable = ({ files, loading }) => {
   )
 }
 
-const Dashboard = ({ searchQuery }) => {
+const Dashboard = () => {
   const [data, setData] = useState([])
   const [files, setFiles] = useState([])
   const [loading, setLoading] = useState(true)
   const [filesLoading, setFilesLoading] = useState(true)
   const [activeFilters, setActiveFilters] = useState({})
+  const [searchQuery, setSearchQuery] = useState('')
+  const [error, setError] = useState(null)
+  
+  const apiUrl = 'https://wy0vrlpu67.execute-api.us-east-1.amazonaws.com/data?mode=latest'
   const projectName = 'project-name'
 
-  useEffect(() => {
-    const fetchData = async () => {
-      setLoading(true)
-      try {
-        const result = await mockApi.fetchData(projectName)
-        setData(result)
-      } catch (error) {
-        console.error('Error fetching data:', error)
+  const fetchData = async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const result = await api.fetchData(apiUrl)
+      console.log('Fetched data:', result)
+      
+      let dataArray = []
+      if (Array.isArray(result)) {
+        dataArray = result
+      } else if (result && typeof result === 'object') {
+        if (result.data && Array.isArray(result.data)) {
+          dataArray = result.data
+        } else if (result.items && Array.isArray(result.items)) {
+          dataArray = result.items
+        } else if (result.body) {
+          try {
+            const parsed = typeof result.body === 'string' ? JSON.parse(result.body) : result.body
+            dataArray = Array.isArray(parsed) ? parsed : []
+          } catch (e) {
+            console.error('Error parsing body:', e)
+          }
+        }
       }
-      setLoading(false)
-    };
+      
+      setData(dataArray)
+    } catch (error) {
+      console.error('Error fetching data:', error)
+      setError(`ไม่สามารถดึงข้อมูลได้: ${error.message}`)
+      setData([])
+    }
+    setLoading(false)
+  }
 
+  useEffect(() => {
     const fetchFiles = async () => {
       setFilesLoading(true)
       try {
-        const result = await mockApi.fetchFiles(projectName)
-        setFiles(result)
+        const result = await api.fetchFiles(projectName)
+        if (Array.isArray(result)) {
+          setFiles(result)
+        } else {
+          setFiles([])
+        }
       } catch (error) {
         console.error('Error fetching files:', error)
+        setFiles([])
       }
       setFilesLoading(false)
     }
 
     fetchData()
     fetchFiles()
-  }, [])
+  }, [apiUrl])
 
-  // Enhanced dynamic filters - only for specific columns
   const filters = useMemo(() => {
     if (data.length === 0) return {}
 
-    const result = {};
-    // Define which columns should have dropdown filters
-    const dropdownColumns = ['DEVICE', 'species'];
-    const columns = Object.keys(data[0]);
+    const result = {}
+    const dropdownColumns = ['DEVICE', 'species']
+    const columns = Object.keys(data[0])
 
     columns.forEach(column => {
-      // Only create dropdowns for specified columns
       if (dropdownColumns.includes(column)) {
-        const values = [];
+        const values = []
         
         data.forEach(item => {
-          const value = item[column];
+          const value = item[column]
           
           if (Array.isArray(value)) {
-            // For array values like species, add individual items
             value.forEach(subValue => {
-              if (!values.includes(subValue) && subValue !== '') {
-                values.push(subValue);
+              if (subValue !== null && subValue !== undefined && subValue !== '' && !values.includes(subValue)) {
+                values.push(subValue)
               }
-            });
-          } else if (value !== null && value !== undefined && value !== '') {
-            // For regular values
-            if (!values.includes(value)) {
-              values.push(value);
-            }
+            })
+          } else if (value !== null && value !== undefined && value !== '' && !values.includes(value)) {
+            values.push(value)
           }
-        });
+        })
 
-        // Only create filter if there are multiple unique values
         if (values.length > 1) {
-          result[column] = values.sort();
+          result[column] = values.sort()
         }
       }
-    });
+    })
 
-    return result;
+    return result
   }, [data])
 
-  // Enhanced filtering and search
   const filteredData = useMemo(() => {
-    let result = data;
+    let result = data
 
-    // Apply filters
     Object.entries(activeFilters).forEach(([key, value]) => {
       if (value) {
         result = result.filter(item => {
-          const itemValue = item[key];
+          const itemValue = item[key]
           
           if (Array.isArray(itemValue)) {
-            return itemValue.includes(value);
+            return itemValue.includes(value)
           }
           
-          return itemValue === value;
-        });
+          return itemValue === value
+        })
       }
-    });
+    })
 
-    // Apply search
     if (searchQuery) {
       result = result.filter(item =>
         Object.values(item).some(value => {
+          if (value === null || value === undefined) return false
+          
           if (Array.isArray(value)) {
             return value.some(subValue => 
-              subValue.toString().toLowerCase().includes(searchQuery.toLowerCase())
-            );
+              String(subValue).toLowerCase().includes(searchQuery.toLowerCase())
+            )
           }
-          return value.toString().toLowerCase().includes(searchQuery.toLowerCase());
+          return String(value).toLowerCase().includes(searchQuery.toLowerCase())
         })
-      );
+      )
     }
 
-    return result;
-  }, [data, activeFilters, searchQuery]);
+    return result
+  }, [data, activeFilters, searchQuery])
 
   const handleFilterChange = (filterKey, value) => {
     setActiveFilters(prev => ({
@@ -572,24 +576,60 @@ const Dashboard = ({ searchQuery }) => {
   }
 
   const handleClearFilters = () => {
-    setActiveFilters({});
+    setActiveFilters({})
+  }
+
+  const handleValueClick = (column, value) => {
+    setActiveFilters(prev => ({
+      ...prev,
+      [column]: value
+    }))
+  }
+
+  if (error) {
+    return (
+      <div className="p-6">
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-800">
+          <p className="font-medium">เกิดข้อผิดพลาด</p>
+          <p className="text-sm mt-1">{error}</p>
+          <button 
+            onClick={() => window.location.reload()} 
+            className="mt-3 px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 text-sm"
+          >
+            ลองใหม่อีกครั้ง
+          </button>
+        </div>
+        <div className="mt-4 bg-blue-50 border border-blue-200 rounded-lg p-4">
+          <p className="font-medium text-blue-800 mb-2">ข้อมูลการดีบัก:</p>
+          <p className="text-sm text-blue-700">เปิด Console (F12) เพื่อดูข้อมูลเพิ่มเติม</p>
+        </div>
+      </div>
+    )
   }
 
   return (
-    <div className="space-y-6">
-      <ApiInfo projectName={projectName} />
+    <div className="p-6 bg-gray-50 min-h-screen">
+      <div className="max-w-7xl mx-auto space-y-6">
+        <div className="bg-white p-6 rounded-lg shadow">
+          <h1 className="text-2xl font-bold text-gray-800 mb-2">Dashboard</h1>
+          <p className="text-sm text-gray-600">ระบบจัดการข้อมูลและไฟล์</p>
+        </div>
 
-      {Object.keys(filters).length > 0 && (
-        <FilterComponent
-          filters={filters}
-          activeFilters={activeFilters}
-          onFilterChange={handleFilterChange}
-          onClearFilters={handleClearFilters}
-        />
-      )}
+        <ApiInfo apiUrl={apiUrl} />
 
-      <DataTable data={filteredData} loading={loading} />
-      <FileTable files={files} loading={filesLoading} />
+        {Object.keys(filters).length > 0 && (
+          <FilterComponent
+            filters={filters}
+            activeFilters={activeFilters}
+            onFilterChange={handleFilterChange}
+            onClearFilters={handleClearFilters}
+            onValueClick={handleValueClick}
+          />
+        )}
+
+        <DataTable data={filteredData} loading={loading} onValueClick={handleValueClick} />
+        <FileTable files={files} loading={filesLoading} />
+      </div>
     </div>
   )
 }
