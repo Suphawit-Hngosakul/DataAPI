@@ -441,7 +441,7 @@ const Dashboard = () => {
   const [searchQuery, setSearchQuery] = useState('')
   const [error, setError] = useState(null)
   
-  const apiUrl = 'https://wy0vrlpu67.execute-api.us-east-1.amazonaws.com/data?mode=latest'
+  const apiUrl = 'https://899cd9bqa6.execute-api.us-east-1.amazonaws.com/get?ProjectID=37'
   const projectName = 'project-name'
 
   const fetchData = async () => {

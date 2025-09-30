@@ -4,12 +4,11 @@ import { Upload, AlertCircle, CheckCircle, Copy, Check } from 'lucide-react';
 // Shared API configuration
 const API_CONFIG = {
   dataUrl: 'https://wy0vrlpu67.execute-api.us-east-1.amazonaws.com/data',
-  uploadUrl: 'http://localhost:8080/api/uploaddata',
-  projectName: 'project-name'
+  uploadUrl: 'https://zf6acqqua4.execute-api.us-east-1.amazonaws.com/upload',
 };
 
-const ApiInfo = ({ uploadUrl, projectName }) => {
-  const fullUrl = `${uploadUrl}/${projectName}`;
+const ApiInfo = ({ uploadUrl}) => {
+  const fullUrl = `${uploadUrl}`;
   const [copied, setCopied] = useState(false);
 
   const handleCopy = () => {
@@ -45,7 +44,7 @@ const CodeExample = () => {
 import requests
 
 def upload_file(file_path, project_name):
-    url = "${API_CONFIG.uploadUrl}/${API_CONFIG.projectName}"
+    url = "${API_CONFIG.uploadUrl}"
     
     with open(file_path, 'rb') as file:
         files = {'file': file}
@@ -59,7 +58,7 @@ def upload_file(file_path, project_name):
         return None
 
 # Example usage
-result = upload_file("data.json", "${API_CONFIG.projectName}")
+result = upload_file("data.json", "${API_CONFIG}")
 print("Result:", result)`;
 
   const jsCode = `// JavaScript/Node.js Example - Upload File to API
@@ -67,16 +66,27 @@ const FormData = require('form-data');
 const fs = require('fs');
 const fetch = require('node-fetch');
 
-async function uploadFile(filePath, projectName) {
+async function uploadFile(filePath) {
   const formData = new FormData();
   formData.append('file', fs.createReadStream(filePath));
   
   const response = await fetch(
-    \`${API_CONFIG.uploadUrl}/\${projectName}\`,
+    \`${API_CONFIG.uploadUrl}\`,
     {
-      method: 'POST',
-      body: formData
-    }
+      Method : Post
+      Example : {
+       "result": {
+        "colA" : "test",
+        "colB" : "test",
+        "colC": "adwd",
+        "ttest": "awdwada",
+        "location": {
+            "lat": 1135,
+            "long": 9099
+        }
+    },
+    "datastream_id": 41
+}
   );
   
   if (response.ok) {
@@ -89,12 +99,12 @@ async function uploadFile(filePath, projectName) {
 }
 
 // Example usage
-uploadFile('data.json', '${API_CONFIG.projectName}')
+uploadFile('data.json', '${API_CONFIG}')
   .then(result => console.log('Result:', result));`;
 
   const curlCode = `# cURL Example - Upload File to API
 curl -X POST \\
-  "${API_CONFIG.uploadUrl}/${API_CONFIG.projectName}" \\
+  "${API_CONFIG.uploadUrl}" \\
   -F "file=@data.json" \\
   -H "Content-Type: multipart/form-data"`;
 
@@ -286,7 +296,7 @@ const UploadPage = () => {
 
         <ApiInfo 
           uploadUrl={API_CONFIG.uploadUrl}
-          projectName={API_CONFIG.projectName}
+          
         />
 
         <Instructions />
