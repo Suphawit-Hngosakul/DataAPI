@@ -1,7 +1,7 @@
 import json
 import os
 import requests
-from datetime import datetime
+from datetime import datetime, timezone
 
 def lambda_handler(event, context):
     url = os.environ.get("FROST_SERVER_URL")
@@ -31,7 +31,7 @@ def lambda_handler(event, context):
             "statusCode": 400,
             "body": json.dumps({"error": "'result' is required"})
         }
-    if "location" not in body or "lat" not in body["location"] or "long" not in body["location"]:
+    if "location" not in body['result'] or "lat" not in body['result']["location"] or "long" not in body['result']["location"]:
         return {
             "statusCode": 400,
             "body": json.dumps({"error": "'location' with 'lat' and 'long' is required"})
@@ -39,7 +39,7 @@ def lambda_handler(event, context):
 
 
     datastream_id = body["datastream_id"]
-    lat, lon = body["location"]["lat"], body["location"]["long"]
+    lat, lon = body['result']["location"]["lat"], body['result']["location"]["long"]
 
     # Find if there is existing datastream
     try:
@@ -64,31 +64,25 @@ def lambda_handler(event, context):
                 "body": Sensor.text
             }
         resp_json = Sensor.json()
-        data_columns = resp_json.get('properties', {})
+        data_columns = resp_json.get('properties', {})    
+        date_col = data_columns.get("DATE")
         result_columns = body.get('result', {})
 
-        for col in result_columns.keys():
-            if col not in data_columns.values():
-                return {
-                    "statusCode": 400,
-                    "body": json.dumps({"error": f"Invalid column: {col}"})
-                }
+        expected_cols = set(data_columns.values())  # Allowed columns
+        provided_cols = set(result_columns.keys())  # Request's columns
+        missing_cols = expected_cols - provided_cols   # Missing columns
+        extra_cols = provided_cols - expected_cols    # Invalid columns
 
-            expected_cols = set(data_columns.values())  # Allowed columns
-            provided_cols = set(result_columns.keys())  # Request's columns
 
-            missing_cols = expected_cols - provided_cols  # Missing columns
-            extra_cols = provided_cols - expected_cols    # Invalid columns
-
-            if missing_cols or extra_cols:
-                return {
-                    "statusCode": 400,
-                    "body": json.dumps({
-                        "error": "Column validation failed",
-                        "missing_columns": list(missing_cols),
-                        "invalid_columns": list(extra_cols)
-                    })
-                }
+        if missing_cols or extra_cols:
+            return {
+                "statusCode": 400,
+                "body": json.dumps({
+                    "error": "Column validation failed",
+                    "missing_columns": list(missing_cols),
+                    "invalid_columns": list(extra_cols)
+                })
+            }
 
     except Exception as e:
         return {
@@ -142,9 +136,12 @@ def lambda_handler(event, context):
             }
 
     # Create new observation
+    result = body['result'].copy()
+    result.pop(date_col, None)
     observation = {
-        "result": body["result"],
-        "phenomenonTime": body.get("phenomenonTime", datetime.utcnow().isoformat() + "Z"),
+        "result": result,
+        "phenomenonTime": body['result'].get(date_col, datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")),
+        "resultTime" : datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "FeatureOfInterest": {"@iot.id": foi_id}
     }
 

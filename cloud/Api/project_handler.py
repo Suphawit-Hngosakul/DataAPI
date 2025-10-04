@@ -5,42 +5,8 @@ import requests
 def lambda_handler(event, context):
     url = os.environ.get("FROST_SERVER_URL")
     method = event['requestContext']['http']['method']
-
-    if method == "GET":
-        return handle_get(event, url)
-
     if method == "POST":
         return handle_post(event, url)
-
-
-def handle_get(event, url):
-    url = url + "Things"
-    if not url:
-        return {
-            "statusCode": 500,
-            "body": json.dumps({"error": "Environment variable FROST_SERVER_URL is not set"})
-        }
-
-    try:
-        response = requests.get(url, timeout=10)
-        if response.status_code == 200:
-            data = response.json()
-            return {
-                "statusCode": 200,
-                "body": json.dumps(data.get("value", []), indent=2)
-            }
-        else:
-            return {
-                "statusCode": response.status_code,
-                "body": json.dumps({"error": "FROST server returned error"})
-            }
-    except Exception as e:
-        return {
-            "statusCode": 500,
-            "body": json.dumps({"error": str(e)})
-        }
-
-import json
 
 def handle_post(event, url):
     url = url + "Datastreams"
@@ -66,6 +32,19 @@ def handle_post(event, url):
             "statusCode": 400,
             "body": json.dumps({"error": "'columns' field must be a JSON and is required"}, indent=2)
         }
+    
+    
+    try:
+        date = body['columns']['DATE']
+        location = body['columns']['location']
+        
+    except Exception :
+        return {
+            "statusCode" : 400,
+            "body" : json.dumps({
+                "error" : "'DATE' and 'location' are required"
+            }, indent=2)
+        }
 
     # check columnsDesc
     if not body.get('columnsDesc') or not isinstance(body['columnsDesc'], dict):
@@ -74,12 +53,22 @@ def handle_post(event, url):
             "body": json.dumps({"error": "'columnsDesc' field must be a JSON and is required"}, indent=2)
         }
 
-    # check length
-    if len(body['columns']) != len(body['columnsDesc']):
-        return {
+    columns = set(body.get('columns', {}))  # Allowed columns
+    col_descri = set(body.get('columnsDesc', {}))  # Request's columns
+
+    missing_cols = columns - col_descri  # Missing columns
+    extra_cols = col_descri - columns    # Invalid columns
+
+    if missing_cols or extra_cols:
+         return {
             "statusCode": 400,
-            "body": json.dumps({"error": "Column mismatch"}, indent=2)
+             "body": json.dumps({
+                "error": "Column mismatch",
+                "missing_columns": list(missing_cols),
+                "invalid_columns": list(extra_cols)
+            }, indent=2)
         }
+
 
     # build FROST entities
     Thing = {
@@ -91,7 +80,7 @@ def handle_post(event, url):
         "name": Thing['name'] + " Columns",
         "description": f"All columns for {Thing['name']}",
         "encodingType": "text/plain",   
-        "metadata": "Column metadata",
+        "metadata": "Data schema",
         "properties": {k: v for k, v in body['columns'].items()}
     }
 
