@@ -6,42 +6,14 @@ def lambda_handler(event, context):
     url = os.environ.get("FROST_SERVER_URL")
     method = event['requestContext']['http']['method']
 
-    if method == "GET":
-        return handle_get(event, url)
-
     if method == "POST":
         return handle_post(event, url)
+    
+    if method == "DELETE":
+        return handle_delete(event, url)
 
 
-def handle_get(event, url):
-    url = url + "Things"
-    if not url:
-        return {
-            "statusCode": 500,
-            "body": json.dumps({"error": "Environment variable FROST_SERVER_URL is not set"})
-        }
-
-    try:
-        response = requests.get(url, timeout=10)
-        if response.status_code == 200:
-            data = response.json()
-            return {
-                "statusCode": 200,
-                "body": json.dumps(data.get("value", []), indent=2)
-            }
-        else:
-            return {
-                "statusCode": response.status_code,
-                "body": json.dumps({"error": "FROST server returned error"})
-            }
-    except Exception as e:
-        return {
-            "statusCode": 500,
-            "body": json.dumps({"error": str(e)})
-        }
-
-import json
-
+# Handle POST requests
 def handle_post(event, url):
     url = url + "Datastreams"
 
@@ -112,7 +84,7 @@ def handle_post(event, url):
 
     Sensor = {
         "name": Thing['name'] + " Columns",
-        "description": f"All columns for {Thing['name']}",
+        "description": f"Data schema for {Thing['name']}",
         "encodingType": "text/plain",   
         "metadata": "Data schema",
         "properties": {k: v for k, v in body['columns'].items()}
@@ -144,12 +116,11 @@ def handle_post(event, url):
 
         thing_id = None
         thing_res = requests.get(url+f"({datastream_id})/Thing", timeout=10)
-        print("Created datastream with @iot.id =", datastream_id)
-        
+
         if thing_res.status_code == 200:
             thing = thing_res.json()
-            print(thing)
             thing_id = thing["@iot.id"]
+            print("Created thing with @iot.id =", thing_id)
 
         return {
             "statusCode": 201,
@@ -166,4 +137,75 @@ def handle_post(event, url):
         }
 
 
+# Handle DELETE request
+def handle_delete(event, url):
+    project_id = event.get("pathParameters", {}).get("id")
+    print(project_id)
+    if not project_id:
+        return {
+            "statusCode": 400,
+            "body": json.dumps({"error": "Project ID is required in path"}, indent=2)
+        }
     
+    try:
+        # Find datastream 
+        resp = requests.get(f"{url}Things({project_id})/Datastreams")
+        if resp.status_code != 200:
+            return {
+                "statusCode": resp.status_code,
+                "body": resp.text
+            }
+        dt_resp = resp.json()
+        dt = dt_resp["value"][0]
+        dt_id = dt.get("@iot.id", None)
+
+        # Find related sensor
+        resp = requests.get(f"{url}Datastreams({dt_id})/Sensor")      
+        if resp.status_code != 200:
+            return {
+                "statusCode": resp.status_code,
+                "body": resp.text
+            } 
+        sensor = resp.json()
+        sensor_id = sensor.get("@iot.id", None)
+
+        # Find related observed prop
+        resp = requests.get(f"{url}Datastreams({dt_id})/ObservedProperty")
+        if resp.status_code != 200:
+            return {
+                "statusCode": resp.status_code,
+                "body": resp.text
+            }
+        observ_prop = resp.json()
+        observ_prop_id = observ_prop.get("@iot.id", None)
+
+        # Delete sensor
+        if sensor_id:
+            resp = requests.delete(f"{url}Sensors({sensor_id})")
+            print("Deleted sensor with @iot.id =", sensor_id)
+        # Delete observed prpp
+        if observ_prop_id:
+            resp = requests.delete(f"{url}ObservedProperties({observ_prop_id})")
+            print("Deleted observed property with @iot.id =", observ_prop_id)
+
+        # Delete thing (will cascade delete the rest)
+        delete_url = f"{url}Things({project_id})"
+        resp = requests.delete(delete_url, timeout=10)
+        
+        if resp.status_code in (200, 204):
+            print("Deleted thing with @iot.id =", project_id)
+            return {
+                "statusCode": 204
+            }
+        else:
+            return {
+                "statusCode": resp.status_code,
+                "body": resp.text
+            }
+    except Exception as e:
+        return {
+            "statusCode": 500,
+            "body": json.dumps({"error": str(e)})
+        } 
+    
+
