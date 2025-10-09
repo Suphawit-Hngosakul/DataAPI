@@ -2,12 +2,19 @@ import React, { useState } from 'react';
 import Navbar from './components/Navbar';
 import Dashboard from './pages/Dashboard';
 import Upload from './pages/Upload';
+import Login from './pages/Login';
 
-// Main App Component
 const App = () => {
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [searchQuery, setSearchQuery] = useState('');
 
+  // ถ้ายังไม่ได้ login → แสดงหน้า Login
+  if (!isLoggedIn) {
+    return <Login onLogin={() => setIsLoggedIn(true)} />;
+  }
+
+  // ถ้า login แล้ว → แสดง Navbar + Dashboard/Upload
   return (
     <div className="min-h-screen bg-gray-50">
       <Navbar
