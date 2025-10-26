@@ -1,211 +1,141 @@
-import json
 import os
+import json
+import psycopg2
 import requests
 
+# --- Config --- #
+RDS_HOST = os.environ['RDS_HOST']
+RDS_PORT = os.environ.get('RDS_PORT', 5432)
+RDS_DB = os.environ['RDS_DB']
+RDS_USER = os.environ['RDS_USER']
+RDS_PASS = os.environ['RDS_PASS']
+
+GEOSERVER_URL = os.environ['GEOSERVER_URL']  
+GEOSERVER_USER = os.environ['GEOSERVER_USER']
+GEOSERVER_PASS = os.environ['GEOSERVER_PASS']
+
+
 def lambda_handler(event, context):
-    url = os.environ.get("FROST_SERVER_URL")
-    method = event['requestContext']['http']['method']
+    """
+    event example:
+    {
+        "name": "Noise 2025",
+        "description": "Crowdsourced noise measurements",
+        "owner_id": 2
+    }
+    """
+    dataset_name = event.get("name")
+    dataset_desc = event.get("description", "")
+    owner_id = event.get("owner_id")
 
-    if method == "POST":
-        return handle_post(event, url)
-    
-    if method == "DELETE":
-        return handle_delete(event, url)
+    if not dataset_name or not owner_id:
+        return {"statusCode": 400, "body": "Missing required fields"}
 
-
-# Handle POST requests
-def handle_post(event, url):
-    url = url + "Datastreams"
-
+    # Insert dataset into RDS
     try:
-        body = json.loads(event['body'])
-    except Exception:
-        return {
-            "statusCode": 400,
-            "body": json.dumps({"error": "Invalid JSON body"}, indent=2)
-        }
-
-    # check project
-    if not body.get('project'):
-        return {
-            "statusCode": 400,
-            "body": json.dumps({"error": "'project' field is required"}, indent=2)
-        }
-
-    # check columns
-    if not body.get('columns') or not isinstance(body['columns'], dict):
-        return {
-            "statusCode": 400,
-            "body": json.dumps({"error": "'columns' field must be a JSON and is required"}, indent=2)
-        }
-    
-    
-    try:
-        date = body['columns']['DATE']
-        location = body['columns']['location']
-        
-    except Exception :
-        return {
-            "statusCode" : 400,
-            "body" : json.dumps({
-                "error" : "'DATE' and 'location' are required"
-            }, indent=2)
-        }
-
-    # check columnsDesc
-    if not body.get('columnsDesc') or not isinstance(body['columnsDesc'], dict):
-        return {
-            "statusCode": 400,
-            "body": json.dumps({"error": "'columnsDesc' field must be a JSON and is required"}, indent=2)
-        }
-
-    columns = set(body.get('columns', {}))  # Allowed columns
-    col_descri = set(body.get('columnsDesc', {}))  # Request's columns
-
-    missing_cols = columns - col_descri  # Missing columns
-    extra_cols = col_descri - columns    # Invalid columns
-
-    if missing_cols or extra_cols:
-         return {
-            "statusCode": 400,
-             "body": json.dumps({
-                "error": "Column mismatch",
-                "missing_columns": list(missing_cols),
-                "invalid_columns": list(extra_cols)
-            }, indent=2)
-        }
-
-
-    # build FROST entities
-    Thing = {
-        "name": body['project']['name'],
-        "description": body['project']['description']
-    }
-
-    Sensor = {
-        "name": Thing['name'] + " Columns",
-        "description": f"Data schema for {Thing['name']}",
-        "encodingType": "text/plain",   
-        "metadata": "Data schema",
-        "properties": {k: v for k, v in body['columns'].items()}
-    }
-
-    ObservedProperty = {
-        "name": f"{Thing['name']} column details",
-        "description": f"Detail for each column in {Thing['name']}",
-        "definition": "",
-        "properties": {k: v for k, v in body['columnsDesc'].items()}
-    }
-
-    Datastream = {
-        "name": Thing['name'] + " Datastream",
-        "description": f"Datastream for {Thing['name']}",
-        "observationType": "",
-        "unitOfMeasurement": {},
-        "ObservedProperty": ObservedProperty,
-        "Sensor": Sensor,
-        "Thing": Thing
-    }
-
-    try:
-        response = requests.post(url, json=Datastream)
-        response.raise_for_status()
-        location = response.headers.get("Location")
-        datastream_id = location.split("(")[-1].replace(")", "")
-        print("Created datastream with @iot.id =", datastream_id)
-
-        thing_id = None
-        thing_res = requests.get(url+f"({datastream_id})/Thing", timeout=10)
-
-        if thing_res.status_code == 200:
-            thing = thing_res.json()
-            thing_id = thing["@iot.id"]
-            print("Created thing with @iot.id =", thing_id)
-
-        return {
-            "statusCode": 201,
-            "body": json.dumps({
-                "message": "Datastream created successfully",
-                "datastream_id": int(datastream_id),
-                "project_id" : thing_id
-            }, indent=2)
-        }
+        conn = psycopg2.connect(
+            host=RDS_HOST,
+            port=RDS_PORT,
+            database=RDS_DB,
+            user=RDS_USER,
+            password=RDS_PASS
+        )
+        cur = conn.cursor()
+        insert_sql = """
+        INSERT INTO datasets (name, description, owner_id, is_active)
+        VALUES (%s, %s, %s, TRUE)
+        RETURNING dataset_id;
+        """
+        cur.execute(insert_sql, (dataset_name, dataset_desc, owner_id))
+        dataset_id = cur.fetchone()[0]
+        conn.commit()
+        cur.close()
+        conn.close()
+        print(f"Inserted dataset_id={dataset_id}")
     except Exception as e:
-        return {
-            "statusCode": 500,
-            "body": json.dumps({"error": str(e)})
-        }
+        print("Error inserting dataset:", e)
+        return {"statusCode": 500, "body": f"DB insert error: {e}"}
 
+    # Create workspace in GeoServer
+    workspace_name = dataset_name.lower().replace(" ", "_")
+    workspace_payload = {
+        "workspace": {"name": workspace_name}
+    }
 
-# Handle DELETE request
-def handle_delete(event, url):
-    project_id = event.get("pathParameters", {}).get("id")
-    print(project_id)
-    if not project_id:
-        return {
-            "statusCode": 400,
-            "body": json.dumps({"error": "Project ID is required in path"}, indent=2)
-        }
-    
     try:
-        # Find datastream 
-        resp = requests.get(f"{url}Things({project_id})/Datastreams")
-        if resp.status_code != 200:
+        url_workspace = f"{GEOSERVER_URL}/rest/workspaces"
+        headers = {"Content-Type": "application/json"}
+        response = requests.post(
+            url_workspace,
+            auth=(GEOSERVER_USER, GEOSERVER_PASS),
+            headers=headers,
+            json=workspace_payload,
+            timeout=30
+        )
+        if response.status_code in [200, 201]:
+            print(f"Workspace '{workspace_name}' created successfully in GeoServer")
+        elif response.status_code == 409:
+            print(f"Workspace '{workspace_name}' already exists")
             return {
-                "statusCode": resp.status_code,
-                "body": resp.text
-            }
-        dt_resp = resp.json()
-        dt = dt_resp["value"][0]
-        dt_id = dt.get("@iot.id", None)
-
-        # Find related sensor
-        resp = requests.get(f"{url}Datastreams({dt_id})/Sensor")      
-        if resp.status_code != 200:
-            return {
-                "statusCode": resp.status_code,
-                "body": resp.text
-            } 
-        sensor = resp.json()
-        sensor_id = sensor.get("@iot.id", None)
-
-        # Find related observed prop
-        resp = requests.get(f"{url}Datastreams({dt_id})/ObservedProperty")
-        if resp.status_code != 200:
-            return {
-                "statusCode": resp.status_code,
-                "body": resp.text
-            }
-        observ_prop = resp.json()
-        observ_prop_id = observ_prop.get("@iot.id", None)
-
-        # Delete sensor
-        if sensor_id:
-            resp = requests.delete(f"{url}Sensors({sensor_id})")
-            print("Deleted sensor with @iot.id =", sensor_id)
-        # Delete observed prpp
-        if observ_prop_id:
-            resp = requests.delete(f"{url}ObservedProperties({observ_prop_id})")
-            print("Deleted observed property with @iot.id =", observ_prop_id)
-
-        # Delete thing (will cascade delete the rest)
-        delete_url = f"{url}Things({project_id})"
-        resp = requests.delete(delete_url, timeout=10)
-        
-        if resp.status_code in (200, 204):
-            print("Deleted thing with @iot.id =", project_id)
-            return {
-                "statusCode": 204
+                "statusCode" : 400,
+                "body" : json.dumps({
+                    "message" : f"Project '{dataset_name}' already exist" 
+                })
             }
         else:
-            return {
-                "statusCode": resp.status_code,
-                "body": resp.text
-            }
+            print("GeoServer response:", response.status_code, response.text)
+            return {"statusCode": 500, "body": f"GeoServer error: {response.text}"}
     except Exception as e:
-        return {
-            "statusCode": 500,
-            "body": json.dumps({"error": str(e)})
-        } 
-    
+        print("Error creating GeoServer workspace:", e)
+        return {"statusCode": 500, "body": f"GeoServer request error: {e}"}
 
+    # Create datastore in GeoServer
+    store_name = f"{workspace_name}_store"
+    store_payload = {
+        "dataStore": {
+            "name": store_name,
+            "connectionParameters": {
+                "entry": [
+                    {"@key": "host", "$": RDS_HOST},
+                    {"@key": "port", "$": str(RDS_PORT)},
+                    {"@key": "database", "$": RDS_DB},
+                    {"@key": "user", "$": RDS_USER},
+                    {"@key": "passwd", "$": RDS_PASS},
+                    {"@key": "dbtype", "$": "postgis"}
+                ]
+            }
+        }
+    }
+
+    try:
+        url_store = f"{GEOSERVER_URL}/rest/workspaces/{workspace_name}/datastores"
+        headers = {"Content-Type": "application/json"}
+        response_store = requests.post(
+            url_store,
+            auth=(GEOSERVER_USER, GEOSERVER_PASS),
+            headers=headers,
+            json=store_payload,
+            timeout=30
+        )
+
+        if response_store.status_code in [200, 201]:
+            print(f"Datastore '{store_name}' created successfully in workspace '{workspace_name}'")
+        elif response_store.status_code == 409:
+            print(f"Datastore '{store_name}' already exists")
+        else:
+            print("GeoServer datastore response:", response_store.status_code, response_store.text)
+            return {"statusCode": 500, "body": f"GeoServer datastore error: {response_store.text}"}
+
+    except Exception as e:
+        print("Error creating GeoServer datastore:", e)
+        return {"statusCode": 500, "body": f"GeoServer datastore request error: {e}"}
+
+    return {
+        "statusCode": 200,
+        "body": json.dumps({
+            "dataset_id": dataset_id,
+            "workspace": workspace_name,
+            "datastore": store_name,
+            "message": f"Workspace and datastore created successfully for {dataset_name}"
+        })
+    }
