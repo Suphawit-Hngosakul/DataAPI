@@ -56,6 +56,7 @@ def lambda_handler(event, context):
         print("Error inserting dataset:", e)
         return {"statusCode": 500, "body": f"DB insert error: {e}"}
 
+    # TODO: Check before continure: Is workspace name already exist?
     # Create workspace in GeoServer
     workspace_name = dataset_name.lower().replace(" ", "_")
     workspace_payload = {
