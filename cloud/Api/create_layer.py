@@ -35,9 +35,7 @@ def lambda_handler(event, context):
     fields = event.get("fields", [])
     geom_type = "POINT"
 
-
     # Get workspace name from datasets table
-
     try:
         with psycopg2.connect(
             host=RDS_HOST, port=RDS_PORT, database=RDS_DB,
@@ -51,7 +49,6 @@ def lambda_handler(event, context):
                 workspace = row[0].lower().replace(" ", "_")
     except Exception as e:
         return {"statusCode": 500, "body": f"DB error: {e}"}
-
 
     # Insert new layer record
     try:
@@ -70,8 +67,6 @@ def lambda_handler(event, context):
     except Exception as e:
         return {"statusCode": 500, "body": f"Insert layer error: {e}"}
 
-
-    # TODO: First, check that is this layer already exist? 
     # Insert field schema records
     if fields:
         try:
@@ -90,9 +85,8 @@ def lambda_handler(event, context):
         except Exception as e:
             return {"statusCode": 500, "body": f"Insert fields error: {e}"}
 
-    # ──────────────────────────────────────────────
+
     # Create FeatureType XML (master layer)
-    # ──────────────────────────────────────────────
     xml_master = f"""<?xml version="1.0" encoding="UTF-8"?>
 <featureType>
     <name>{layer_name}</name>
