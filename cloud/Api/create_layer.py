@@ -1,6 +1,7 @@
 import os
 import psycopg2
 import requests
+import json
 
 # Config
 RDS_HOST = os.environ['RDS_HOST']
@@ -18,7 +19,6 @@ def lambda_handler(event, context):
     """
     Example Event JSON:
     {
-        "dataset_id": 2,
         "layer_name": "noise_measurements",
         "title": "Noise Measurements",
         "srid": 4326,
@@ -28,14 +28,24 @@ def lambda_handler(event, context):
         ]
     }
     """
-    dataset_id = event.get("dataset_id")
-    layer_name = event.get("layer_name")
-    title = event.get("title", layer_name)
-    srid = event.get("srid", 4326)
-    fields = event.get("fields", [])
-    geom_type = "POINT"
+    path_params = event.get('pathParameters') or {}
+    dataset_id = path_params.get("dataset_id")
 
+    body = event.get("body")
+    if isinstance(body, str):
+        body = json.loads(body)
+    elif not body:
+        body = {}
+
+    layer_name = body.get("layer_name")
+    title = body.get("title", layer_name)
+    srid = body.get("srid", 4326)
+    fields = body.get("fields", [])
+    geom_type = body.get("geom_type", "POINT")
+
+    # ──────────────────────────────────────────────
     # Get workspace name from datasets table
+    # ──────────────────────────────────────────────
     try:
         with psycopg2.connect(
             host=RDS_HOST, port=RDS_PORT, database=RDS_DB,
@@ -50,7 +60,9 @@ def lambda_handler(event, context):
     except Exception as e:
         return {"statusCode": 500, "body": f"DB error: {e}"}
 
+    # ──────────────────────────────────────────────
     # Insert new layer record
+    # ──────────────────────────────────────────────
     try:
         with psycopg2.connect(
             host=RDS_HOST, port=RDS_PORT, database=RDS_DB,
@@ -67,7 +79,9 @@ def lambda_handler(event, context):
     except Exception as e:
         return {"statusCode": 500, "body": f"Insert layer error: {e}"}
 
+    # ──────────────────────────────────────────────
     # Insert field schema records
+    # ──────────────────────────────────────────────
     if fields:
         try:
             with psycopg2.connect(
@@ -80,13 +94,15 @@ def lambda_handler(event, context):
                         VALUES (%s, %s, %s, %s, %s)
                     """
                     for f in fields:
-                        cur.execute(insert_field_sql, (layer_id, f["field_name"], f["data_type"], f.get("unit", "NULL"), f.get("description", "NULL")))
+                        cur.execute(insert_field_sql, (layer_id, f["field_name"], f["data_type"], f.get("unit", None), f.get("description", None)))
+                        print(f'col: {f['field_name']}, type: {f['data_type']}')
                     conn.commit()
         except Exception as e:
             return {"statusCode": 500, "body": f"Insert fields error: {e}"}
 
-
+    # ──────────────────────────────────────────────
     # Create FeatureType XML (master layer)
+    # ──────────────────────────────────────────────
     xml_master = f"""<?xml version="1.0" encoding="UTF-8"?>
 <featureType>
     <name>{layer_name}</name>
@@ -118,16 +134,19 @@ def lambda_handler(event, context):
             user=RDS_USER, password=RDS_PASS
         ) as conn:
             with conn.cursor() as cur:
-                cur.execute("SELECT field_name FROM fields WHERE layer_id=%s;", (layer_id,))
-                field_names = [r[0] for r in cur.fetchall()]
+                cur.execute("SELECT field_name, data_type FROM fields WHERE layer_id=%s;", (layer_id,))
+                field_rows = cur.fetchall()
+                print(field_rows)
     except Exception as e:
         return {"statusCode": 500, "body": f"Query fields error: {e}"}
 
-    if not field_names:
+    if not field_rows:
         return {"statusCode": 400, "body": "No fields defined for this layer"}
 
-    
-    field_sql = ",\n       ".join([f"attributes->>'{f}' AS {f}" for f in field_names])
+    field_sql = ",\n       ".join([
+        f"(attributes->>'{f[0]}')::{f[1]} AS {f[0]}"
+        for f in field_rows
+    ])
 
     xml_view = f"""<?xml version="1.0" encoding="UTF-8"?>
 <featureType>
@@ -140,7 +159,7 @@ def lambda_handler(event, context):
             <virtualTable>
                 <name>{layer_name}_view</name>
                 <sql>
-                    SELECT measure_id,
+                    SELECT measure_id AS id,
                            {field_sql},
                            geom,
                            timestamp
@@ -164,20 +183,28 @@ def lambda_handler(event, context):
         r = requests.post(url, data=xml_view, headers=headers,
                           auth=(GEOSERVER_USER, GEOSERVER_PASS), timeout=30)
         if r.status_code not in [200, 201, 202]:
-            return {"statusCode": 500, "body": f"GeoServer view layer error: {r.text}"}
+            return {"statusCode": r.status_code, "body": f"GeoServer view layer error: {r.text}"}
     except Exception as e:
         return {"statusCode": 500, "body": f"GeoServer view request error: {e}"}
 
     # ──────────────────────────────────────────────
     # Done
     # ──────────────────────────────────────────────
+
+    print("Layer created:", {
+    "layer_id": layer_id,
+    "dataset_id": dataset_id,
+    "workspace": workspace
+    })
+
     return {
         "statusCode": 201,
-        "body": {
+        "headers": {"Content-Type": "application/json"},
+        "body": json.dumps({
             "layer_id": layer_id,
-            "dataset_id": dataset_id,
+            "dataset_id": int(dataset_id),
             "workspace": workspace,
-            "fields": field_names,
-            "message": f"Layer '{layer_name}' created with {len(field_names)} field(s) and published to GeoServer"
-        }
+            "fields": [ f[0] for f in field_rows],
+            "message": f"Layer '{layer_name}' created with {len(field_rows)} field(s) and published to GeoServer"
+        })
     }

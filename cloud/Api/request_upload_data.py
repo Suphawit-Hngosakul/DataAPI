@@ -3,6 +3,7 @@ import os
 import psycopg2
 import requests
 from xml.sax.saxutils import escape
+import xml.etree.ElementTree as ET
 
 # RDS connection
 DB_HOST = os.environ['DB_HOST']
@@ -32,11 +33,11 @@ VALID_GEOM_TYPES = ['POINT', 'LINESTRING', 'POLYGON',
                     'MULTIPOINT', 'MULTILINESTRING', 'MULTIPOLYGON']
 
 def to_pascal_case(s):
-    """แปลง string เป็น PascalCase """
+    """แปลง string เป็น PascalCase สำหรับ GML element"""
     return "".join(word.capitalize() for word in s.lower().split("_"))
 
 def serialize_coords(geom_type, coords):
-    """Serialize coordinates สำหรับ GML """
+    """Serialize coordinates สำหรับ GML (simple version)"""
     geom_type = geom_type.upper()
     if geom_type == "POINT":
         return f"{coords[0]},{coords[1]}"
@@ -53,16 +54,16 @@ def serialize_coords(geom_type, coords):
 
 def lambda_handler(event, context):
     try:
-        print(event)
-        body = json.loads((event.get('body', '{}')))
-        # body = event
-        print(body)
-        layer_id = body.get('layer_id')
-        print(layer_id)
+        path_params = event.get('pathParameters') or {}
+        layer_id = path_params.get("layer_id")
+
+        body = event.get('body')
+        if body:
+            body = json.loads(body)
+
         data = body.get('data', {})
-        print(data)
         geom = body.get('geom')  # {"type":"POINT","coordinates":[lon,lat]}
-        print(geom)
+        
         if not layer_id or not data or not geom:
             return {"statusCode": 400, "body": json.dumps({"error": "layer_id, data, and geom are required"})}
 
@@ -129,7 +130,7 @@ def lambda_handler(event, context):
         workspace_name = dataset_name.lower().replace(" ", "_")
         layer_name_xml = layer_name_db #.lower().replace(" ", "_")  # dynamic layer name
 
-        # สร้าง XML Insert
+        # XML Insert
         geom_type_gml = to_pascal_case(geom["type"])
         coord_str = serialize_coords(geom_type_gml, geom.get("coordinates"))
         attributes_json = json.dumps(data)
@@ -163,17 +164,34 @@ def lambda_handler(event, context):
         conn.close()
         print(workspace_name, layer_name_xml)
 
-        # ส่งไป GeoServer
+        # Send to GeoServer
         response = requests.post(
             f'{GEOSERVER_URL}/geoserver/wfs',
             data=xml_data,
             headers={"Content-Type": "text/xml"},
             auth=(GEOSERVER_USER, GEOSERVER_PASSWORD)
         )
+        
+        print(response.text)
+
+
+        root = ET.fromstring(response.text)
+        ns = {"wfs": "http://www.opengis.net/wfs"}
+        total_inserted = root.find(".//wfs:totalInserted", ns) 
+
+
+        if response.status_code == 200 and total_inserted.text == "1":
+            result = {"success": True, "message": "Feature inserted successfully"}
+        else:
+            print("status code", response.status_code)
+            result = {
+                "success": False,
+                "message": f"Insert failed"
+            }
 
         return {
-            "statusCode": response.status_code,
-            "body": json.dumps({"geo_response": response.text})
+            "statusCode": 200 if result["success"] else 500,
+            "body": json.dumps(result)
         }
 
     except Exception as e:

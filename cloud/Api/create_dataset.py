@@ -21,15 +21,17 @@ def lambda_handler(event, context):
     {
         "name": "Noise 2025",
         "description": "Crowdsourced noise measurements",
-        "owner_id": 2
+        "owner_id": 1
     }
     """
+    event = json.loads(event.get("body", event))
+
     dataset_name = event.get("name")
     dataset_desc = event.get("description", "")
     owner_id = event.get("owner_id")
 
     if not dataset_name or not owner_id:
-        return {"statusCode": 400, "body": "Missing required fields"}
+        return {"statusCode": 400, "body": json.dumps({"message" : "Missing required fields"})}
 
     # Insert dataset into RDS
     try:
@@ -54,9 +56,13 @@ def lambda_handler(event, context):
         print(f"Inserted dataset_id={dataset_id}")
     except Exception as e:
         print("Error inserting dataset:", e)
-        return {"statusCode": 500, "body": f"DB insert error: {e}"}
+        return {
+            "statusCode" : 500,
+            "body" : json.dumps({
+                "message" : f"DB insert error {e}"
+            })
+        }
 
-    # TODO: Check before continure: Is workspace name already exist?
     # Create workspace in GeoServer
     workspace_name = dataset_name.lower().replace(" ", "_")
     workspace_payload = {
@@ -85,10 +91,10 @@ def lambda_handler(event, context):
             }
         else:
             print("GeoServer response:", response.status_code, response.text)
-            return {"statusCode": 500, "body": f"GeoServer error: {response.text}"}
+            return {"statusCode": 500, "body": json.dumps({"message" : f"GeoServer error: {response.text}"})}
     except Exception as e:
         print("Error creating GeoServer workspace:", e)
-        return {"statusCode": 500, "body": f"GeoServer request error: {e}"}
+        return {"statusCode": 500, "body": json.dumps({"message" : f"GeoServer request error: {e}"})}
 
     # Create datastore in GeoServer
     store_name = f"{workspace_name}_store"
@@ -125,14 +131,14 @@ def lambda_handler(event, context):
             print(f"Datastore '{store_name}' already exists")
         else:
             print("GeoServer datastore response:", response_store.status_code, response_store.text)
-            return {"statusCode": 500, "body": f"GeoServer datastore error: {response_store.text}"}
+            return {"statusCode": 500, "body": json.dumps({"message" : f"GeoServer datastore error: {response_store.text}"})}
 
     except Exception as e:
         print("Error creating GeoServer datastore:", e)
-        return {"statusCode": 500, "body": f"GeoServer datastore request error: {e}"}
+        return {"statusCode": 500, "body": json.dumps({"message" : f"GeoServer datastore request error: {e}"})}
 
     return {
-        "statusCode": 200,
+        "statusCode": 201,
         "body": json.dumps({
             "dataset_id": dataset_id,
             "workspace": workspace_name,
