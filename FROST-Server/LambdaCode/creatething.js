@@ -2,23 +2,40 @@ const FROST_BASE_URL = process.env.FROST_BASE_URL;
 
 export const handler = async (event) => {
   try {
-    // รองรับ CORS preflight ก่อน
+    // 1) CORS preflight
     if (event.httpMethod === 'OPTIONS') {
       return {
         statusCode: 200,
         headers: {
           "Access-Control-Allow-Origin": "*",
-          "Access-Control-Allow-Headers": "Content-Type",
+          "Access-Control-Allow-Headers": "Content-Type,Authorization",
           "Access-Control-Allow-Methods": "POST,OPTIONS"
         },
         body: ""
       };
     }
 
-    // ถ้าไม่มี body ให้เป็น {} จะได้ไม่แตก
-    const rawBody = typeof event.body === 'string' && event.body.trim() !== ''
-      ? JSON.parse(event.body)
-      : (typeof event.body === 'object' && event.body !== null ? event.body : {});
+    // 2) ดึง user จาก JWT ที่ถูก authorize แล้ว
+    const claims = event.requestContext?.authorizer?.jwt?.claims;
+    const userId =
+      claims?.sub ||
+      claims?.['cognito:username'] ||
+      null;
+
+    // ถ้าไม่มี user แปลว่าไม่ได้ส่ง token หรือ authorizer ไม่ถูกต้อง
+    if (!userId) {
+      return {
+        statusCode: 401,
+        headers: { "Access-Control-Allow-Origin": "*" },
+        body: JSON.stringify({ message: "Unauthorized: no user in token" })
+      };
+    }
+
+    // 3) parse body ให้ชัวร์
+    const rawBody =
+      typeof event.body === 'string' && event.body.trim() !== ''
+        ? JSON.parse(event.body)
+        : (typeof event.body === 'object' && event.body !== null ? event.body : {});
 
     const {
       thingName,
@@ -36,7 +53,6 @@ export const handler = async (event) => {
       };
     }
 
-    // ถ้ายังไม่ส่งชื่อมาก็แจ้งเลย
     if (!thingName) {
       return {
         statusCode: 400,
@@ -45,10 +61,16 @@ export const handler = async (event) => {
       };
     }
 
+    // 4) บังคับใส่ UserID ลง properties เสมอ
+    const finalProperties = {
+      ...properties,
+      UserID: userId
+    };
+
     const payload = {
       name: thingName,
       description: thingDescription || "",
-      properties,
+      properties: finalProperties,
       Locations: [
         {
           name: location?.name || "Device Location",
@@ -87,6 +109,7 @@ export const handler = async (event) => {
       }))
     };
 
+    // 5) ยิงเข้า FROST
     const res = await fetch(`${FROST_BASE_URL}/Things`, {
       method: "POST",
       headers: {
@@ -95,15 +118,13 @@ export const handler = async (event) => {
       body: JSON.stringify(payload)
     });
 
-    // เช็คว่ามี response body หรือไม่ก่อน parse JSON
     const responseText = await res.text();
     let data = null;
-    
+
     if (responseText && responseText.trim() !== '') {
       try {
         data = JSON.parse(responseText);
       } catch (e) {
-        // ถ้า parse ไม่ได้ แสดงว่าไม่ใช่ JSON
         return {
           statusCode: 500,
           headers: { "Access-Control-Allow-Origin": "*" },
@@ -129,7 +150,7 @@ export const handler = async (event) => {
       };
     }
 
-    // ดึง Thing ID จาก Location header
+    // 6) ดึง Thing ที่สร้างจริง
     const locationHeader = res.headers.get('location');
     let thingId = null;
     if (locationHeader) {
@@ -139,7 +160,6 @@ export const handler = async (event) => {
       }
     }
 
-    // ถ้ามี Thing ID ให้ไปดึงข้อมูลเต็มมา (รวม Datastreams, Locations, Sensors, ObservedProperties)
     let fullThingData = data;
     if (thingId) {
       try {
@@ -152,7 +172,6 @@ export const handler = async (event) => {
             }
           }
         );
-        
         if (thingRes.ok) {
           const thingText = await thingRes.text();
           if (thingText && thingText.trim() !== '') {
@@ -160,8 +179,7 @@ export const handler = async (event) => {
           }
         }
       } catch (e) {
-        console.error("Error fetching full thing data:", e);
-        // ถ้าดึงไม่ได้ก็ใช้ data เดิม
+        // ignore
       }
     }
 
@@ -182,8 +200,7 @@ export const handler = async (event) => {
       headers: { "Access-Control-Allow-Origin": "*" },
       body: JSON.stringify({
         message: "internal error",
-        error: err.message,
-        stack: err.stack
+        error: err.message
       })
     };
   }
