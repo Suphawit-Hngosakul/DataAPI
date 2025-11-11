@@ -48,7 +48,7 @@ def lambda_handler(event, context):
 
         # Normalize names 
         workspace = dataset_name.lower().replace(" ", "_")
-        layer = layer_name #.lower().replace(" ", "_")
+        layer = layer_name.lower().replace(" ", "_")
 
         # Construct GeoServer WFS URL 
         wfs_url = (

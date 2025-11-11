@@ -43,9 +43,8 @@ def lambda_handler(event, context):
     fields = body.get("fields", [])
     geom_type = body.get("geom_type", "POINT")
 
-    # ──────────────────────────────────────────────
-    # Get workspace name from datasets table
-    # ──────────────────────────────────────────────
+
+    # Get workspace name 
     try:
         with psycopg2.connect(
             host=RDS_HOST, port=RDS_PORT, database=RDS_DB,
@@ -60,9 +59,8 @@ def lambda_handler(event, context):
     except Exception as e:
         return {"statusCode": 500, "body": f"DB error: {e}"}
 
-    # ──────────────────────────────────────────────
     # Insert new layer record
-    # ──────────────────────────────────────────────
+    layer_name_normalized = layer_name.lower().replace(" ", "_")
     try:
         with psycopg2.connect(
             host=RDS_HOST, port=RDS_PORT, database=RDS_DB,
@@ -73,15 +71,13 @@ def lambda_handler(event, context):
                     INSERT INTO layers (dataset_id, name, geom_type, srid, description)
                     VALUES (%s, %s, %s, %s, %s)
                     RETURNING layer_id;
-                """, (dataset_id, layer_name, geom_type, srid, title))
+                """, (dataset_id, layer_name_normalized, geom_type, srid, title))
                 layer_id = cur.fetchone()[0]
                 conn.commit()
     except Exception as e:
         return {"statusCode": 500, "body": f"Insert layer error: {e}"}
 
-    # ──────────────────────────────────────────────
-    # Insert field schema records
-    # ──────────────────────────────────────────────
+    # Insert field schema 
     if fields:
         try:
             with psycopg2.connect(
@@ -100,12 +96,11 @@ def lambda_handler(event, context):
         except Exception as e:
             return {"statusCode": 500, "body": f"Insert fields error: {e}"}
 
-    # ──────────────────────────────────────────────
+
     # Create FeatureType XML (master layer)
-    # ──────────────────────────────────────────────
     xml_master = f"""<?xml version="1.0" encoding="UTF-8"?>
 <featureType>
-    <name>{layer_name}</name>
+    <name>{layer_name_normalized}</name>
     <nativeName>measurements</nativeName>
     <title>{title}</title>
     <srs>EPSG:{srid}</srs>
@@ -125,9 +120,8 @@ def lambda_handler(event, context):
     except Exception as e:
         return {"statusCode": 500, "body": f"GeoServer request error: {e}"}
 
-    # ──────────────────────────────────────────────
+
     # Build & Create Virtual View Layer
-    # ──────────────────────────────────────────────
     try:
         with psycopg2.connect(
             host=RDS_HOST, port=RDS_PORT, database=RDS_DB,
@@ -150,14 +144,14 @@ def lambda_handler(event, context):
 
     xml_view = f"""<?xml version="1.0" encoding="UTF-8"?>
 <featureType>
-    <name>{layer_name}_view</name>
+    <name>{layer_name_normalized}_view</name>
     <title>{title} (View)</title>
     <srs>EPSG:{srid}</srs>
     <enabled>true</enabled>
     <metadata>
         <entry key="JDBC_VIRTUAL_TABLE">
             <virtualTable>
-                <name>{layer_name}_view</name>
+                <name>{layer_name_normalized}_view</name>
                 <sql>
                     SELECT measure_id AS id,
                            {field_sql},
@@ -187,9 +181,6 @@ def lambda_handler(event, context):
     except Exception as e:
         return {"statusCode": 500, "body": f"GeoServer view request error: {e}"}
 
-    # ──────────────────────────────────────────────
-    # Done
-    # ──────────────────────────────────────────────
 
     print("Layer created:", {
     "layer_id": layer_id,

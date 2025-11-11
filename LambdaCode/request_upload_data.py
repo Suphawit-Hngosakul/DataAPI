@@ -33,24 +33,118 @@ VALID_GEOM_TYPES = ['POINT', 'LINESTRING', 'POLYGON',
                     'MULTIPOINT', 'MULTILINESTRING', 'MULTIPOLYGON']
 
 def to_pascal_case(s):
-    """แปลง string เป็น PascalCase สำหรับ GML element"""
+    # แปลง string เป็น PascalCase สำหรับ GML element
     return "".join(word.capitalize() for word in s.lower().split("_"))
 
 def serialize_coords(geom_type, coords):
-    """Serialize coordinates สำหรับ GML (simple version)"""
     geom_type = geom_type.upper()
+    print("Geom Type from serialize function", geom_type)
+
     if geom_type == "POINT":
+        # [x, y]
         return f"{coords[0]},{coords[1]}"
-    elif geom_type in ["LINESTRING", "MULTIPOINT"]:
-        return " ".join([f"{c[0]},{c[1]}" for c in coords])
+
+    elif geom_type == "LINESTRING":
+        return " ".join(f"{x},{y}" for x, y in coords)
+
     elif geom_type == "POLYGON":
-        return " ".join([f"{c[0]},{c[1]}" for c in coords[0]])  # assume first ring
+        rings = []
+        
+        for ring in coords:
+            rings.append(" ".join(f"{x} {y}" for x, y in ring))
+        return rings[0]
+
+    elif geom_type == "MULTIPOINT":
+        # coords = [[x1, y1], [x2, y2], ...]
+        return " ".join(f"{x} {y}" for x, y in coords)
+
+
     elif geom_type == "MULTILINESTRING":
-        return " ".join([f"{pt[0]},{pt[1]}" for line in coords for pt in line])
+        lines = []
+        for line in coords:
+            lines.append(" ".join(f"{x} {y}" for x, y in line))
+        return " ".join(lines)
+
     elif geom_type == "MULTIPOLYGON":
-        return " ".join([f"{pt[0]},{pt[1]}" for poly in coords for ring in poly for pt in ring])
+        polys = []
+        for poly in coords:
+            for ring in poly:
+                polys.append(" ".join(f"{x} {y}" for x, y in ring))
+        return " ".join(polys)
+
     else:
         raise ValueError(f"Unsupported geometry type: {geom_type}")
+
+def generate_gml(geom_type, coords, srid):
+    print("Geom Type from generate function", geom_type)
+    
+    
+    if geom_type == "POINT":
+        return f"""
+    <gml:Point srsName="EPSG:{srid}">
+        <gml:coordinates>{serialize_coords(geom_type, coords)}</gml:coordinates>
+    </gml:Point>
+    """
+    
+    elif geom_type == "LINESTRING":
+        return f"""
+    <gml:LineString srsName="EPSG:{srid}">
+        <gml:coordinates decimal="." cs="," ts=" ">{serialize_coords(geom_type, coords)}</gml:coordinates>
+    </gml:LineString>
+        """
+        
+    elif geom_type == "POLYGON":
+        return f"""
+    <gml:Polygon srsName="EPSG:{srid}">
+        <gml:exterior>
+            <gml:LinearRing>
+                <gml:posList>
+                    {serialize_coords(geom_type, coords)}
+                </gml:posList>
+            </gml:LinearRing>
+        </gml:exterior>
+    </gml:Polygon>
+    """
+    elif geom_type == "MULTIPOINT":
+        gml_data = f'<gml:MultiPoint srsName="EPSG:{srid}">\n'
+        
+        for point in coords:
+            gml_data += f"""
+                <gml:pointMember>
+                    <gml:Point>
+                    <gml:pos>{point[0]} {point[1]}</gml:pos>
+                    </gml:Point>
+                </gml:pointMember>\n"""
+        gml_data += "</gml:MultiPoint>"
+        return gml_data
+        
+    elif geom_type == 'MULTILINESTRING':
+        # coordinates = [
+        #     [[170.0, 45.0], [180.0, 45.0]],
+        #     [[-180.0, 45.0], [-170.0, 45.0]]
+        # ]
+        
+        gml_data = f"""
+            <gml:MultiLineString srsName="EPSG:{srid}">\n   
+        """
+        for elm in coords:
+            line = ""
+            for x, y in elm:
+                line += f"{x} {y} "
+                print("line", line.strip())
+            gml_data += f"""
+                <gml:lineStringMember>
+                    <gml:LineString>
+                        <gml:posList>
+                        {line.strip()}
+                        </gml:posList>
+                    </gml:LineString>
+                </gml:lineStringMember>\n
+            """
+        gml_data += "</gml:MultiLineString>"
+        print(gml_data)
+        return gml_data
+
 
 def lambda_handler(event, context):
     try:
@@ -60,9 +154,12 @@ def lambda_handler(event, context):
         body = event.get('body')
         if body:
             body = json.loads(body)
+        print("body", body)
 
         data = body.get('data', {})
+        print("data", data)
         geom = body.get('geom')  # {"type":"POINT","coordinates":[lon,lat]}
+        print("geom", geom)
         
         if not layer_id or not data or not geom:
             return {"statusCode": 400, "body": json.dumps({"error": "layer_id, data, and geom are required"})}
@@ -128,12 +225,14 @@ def lambda_handler(event, context):
 
         dataset_name = dataset_row[0]
         workspace_name = dataset_name.lower().replace(" ", "_")
-        layer_name_xml = layer_name_db #.lower().replace(" ", "_")  # dynamic layer name
+        layer_name_xml = layer_name_db.lower().replace(" ", "_")  
 
-        # XML Insert
+        # สร้าง XML WFS-T Insert
         geom_type_gml = to_pascal_case(geom["type"])
-        coord_str = serialize_coords(geom_type_gml, geom.get("coordinates"))
         attributes_json = json.dumps(data)
+
+        geom_gml_xml = generate_gml(geom["type"], geom.get("coordinates"), srid_db)
+        print(geom_gml_xml)
 
         xml_data = f"""<?xml version="1.0" encoding="UTF-8"?>
 <wfs:Transaction service="WFS" version="1.1.0"
@@ -152,9 +251,7 @@ def lambda_handler(event, context):
       <{workspace_name}:layer_id>{layer_id}</{workspace_name}:layer_id>
       <{workspace_name}:attributes>{escape(attributes_json)}</{workspace_name}:attributes>
       <{workspace_name}:geom>
-        <gml:{geom_type_gml} srsName="EPSG:{srid_db}">
-          <gml:coordinates>{coord_str}</gml:coordinates>
-        </gml:{geom_type_gml}>
+        {geom_gml_xml}
       </{workspace_name}:geom>
     </{workspace_name}:{layer_name_xml}>
   </wfs:Insert>
@@ -164,7 +261,7 @@ def lambda_handler(event, context):
         conn.close()
         print(workspace_name, layer_name_xml)
 
-        # Send to GeoServer
+        # ส่งไป GeoServer
         response = requests.post(
             f'{GEOSERVER_URL}/geoserver/wfs',
             data=xml_data,
