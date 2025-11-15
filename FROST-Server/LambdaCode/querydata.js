@@ -1,7 +1,7 @@
 const CORS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET,OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
+  "Access-Control-Allow-Headers": "Content-Type,Authorization",
 };
 
 const RAW = (process.env.FROST_URL || "").replace(/\/+$/, "");
@@ -10,6 +10,7 @@ const EXPAND_BASE = encodeURIComponent(
   "Locations,Datastreams($expand=Sensor,ObservedProperty,Observations($top=1;$orderby=phenomenonTime desc))"
 );
 
+// fetch พร้อม timeout
 async function fetchWithTimeout(url, ms = 10000) {
   const ac = new AbortController();
   const t = setTimeout(() => ac.abort(), ms);
@@ -26,14 +27,28 @@ async function fetchWithTimeout(url, ms = 10000) {
 export const handler = async (event) => {
   try {
     const method = event?.requestContext?.http?.method || "GET";
-    if (method === "OPTIONS")
+    if (method === "OPTIONS") {
       return { statusCode: 204, headers: CORS, body: "" };
+    }
+
+    // ต้องอยู่ใน handler
+    const claims = event?.requestContext?.authorizer?.jwt?.claims;
+    const userId = claims?.sub || claims?.["cognito:username"] || null;
+
+    if (!userId) {
+      return {
+        statusCode: 401,
+        headers: CORS,
+        body: "Unauthorized",
+      };
+    }
 
     const q = event?.queryStringParameters || {};
     const thingId = q.thingId ? parseInt(q.thingId) : null;
     const bbox = q.bbox ? q.bbox.split(",").map(Number) : null;
     const top = q.top ? parseInt(q.top) : 1;
 
+    // ========== โหมด 1: ขอของ thing เดียว ==========
     if (thingId) {
       const limit = q.limit ? parseInt(q.limit) : 200;
       const obsUrl = `${FROST_URL}/Things(${thingId})?$expand=Locations,Datastreams($expand=ObservedProperty,Sensor,Observations($top=${limit};$orderby=phenomenonTime desc))`;
@@ -49,8 +64,13 @@ export const handler = async (event) => {
       }
 
       const data = await r.json();
-      if (!data.Datastreams?.length)
-        return { statusCode: 404, headers: CORS, body: "No datastreams found" };
+      if (!data.Datastreams?.length) {
+        return {
+          statusCode: 404,
+          headers: CORS,
+          body: "No datastreams found",
+        };
+      }
 
       const ds = data.Datastreams[0];
       const loc = data.Locations?.[0]?.location;
@@ -78,15 +98,21 @@ export const handler = async (event) => {
       };
     }
 
-    let url = `${FROST_URL}/Things?$expand=${EXPAND_BASE}`;
+    // ========== โหมด 2: ดึงล่าสุดทุก Thing ของ user นี้ ==========
+    // เริ่มจาก filter หลักก่อน
+    let filter = `properties/UserID eq '${userId}'`;
+
+    // ถ้ามี bbox ให้ต่อ AND เข้าไป
     if (bbox?.length === 4) {
       const [minX, minY, maxX, maxY] = bbox;
       const poly = `POLYGON((${minX} ${minY},${maxX} ${minY},${maxX} ${maxY},${minX} ${maxY},${minX} ${minY}))`;
-      const filter = encodeURIComponent(
-        `st_within(Locations/location, geography'SRID=4326;${poly}')`
-      );
-      url += `&$filter=${filter}`;
+      const within = `st_within(Locations/location, geography'SRID=4326;${poly}')`;
+      filter = `${filter} and ${within}`;
     }
+
+    const url = `${FROST_URL}/Things?$filter=${encodeURIComponent(
+      filter
+    )}&$expand=${EXPAND_BASE}`;
 
     const r = await fetchWithTimeout(url, 15000);
     if (!r.ok) {
