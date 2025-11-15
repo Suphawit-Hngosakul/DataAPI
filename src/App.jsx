@@ -2,11 +2,10 @@ import React from "react";
 import { useAuth } from "react-oidc-context";
 import { BrowserRouter as Router, Routes, Route, useNavigate } from "react-router-dom";
 
-import TokenViewer from "./pages/TokenViewer";
+import NewDataset from "./pages/NewDataset";
 import FrostThingCreator from "./pages/FrostThingCreator";
 import SoundMap from "./pages/SoundMap";
 
-// 🔥 Component แยกเพื่อใช้ useNavigate
 function AuthenticatedApp({ auth, idToken, signOutRedirect }) {
   const navigate = useNavigate();
 
@@ -22,14 +21,11 @@ function AuthenticatedApp({ auth, idToken, signOutRedirect }) {
               onNavigateToHome={() => navigate('/')}
               onNavigateToMyThing={() => navigate('/things')}
               onNavigateToNewDevice={() => navigate('/create-thing')}
+              onNavigateToNewDataset={() => navigate('/new-dataset')}
               onNavigateToUpload={() => alert('Upload feature - coming soon')}
-              onSignOut={signOutRedirect}
+              signOutRedirect={signOutRedirect}
             />
           } 
-        />
-        <Route 
-          path="/token" 
-          element={<TokenViewer auth={auth} />} 
         />
         <Route 
           path="/create-thing" 
@@ -50,7 +46,18 @@ function AuthenticatedApp({ auth, idToken, signOutRedirect }) {
               onNavigateToMyThing={() => navigate('/things')}
               onNavigateToNewDevice={() => navigate('/create-thing')}
               onNavigateToUpload={() => alert('Upload feature - coming soon')}
-              onSignOut={signOutRedirect}
+              signOutRedirect={signOutRedirect}
+            />
+          } 
+        />
+        <Route 
+          path="/new-dataset" 
+          element={
+            <NewDataset 
+              idToken={idToken}
+              userEmail={auth.user?.profile?.email || auth.user?.profile?.sub}
+              onCancel={() => navigate('/')}
+              onComplete={() => navigate('/')}
             />
           } 
         />
@@ -62,7 +69,6 @@ function AuthenticatedApp({ auth, idToken, signOutRedirect }) {
 function App() {
   const auth = useAuth();
 
-  // ค่า Cognito ของคุณ
   const clientId = "1jceblsgd204cslnvhtdp8b4k4";
   const logoutUri = "http://localhost:3000";
   const cognitoDomain = "https://us-east-192ay6occq.auth.us-east-1.amazoncognito.com";
@@ -73,7 +79,6 @@ function App() {
     )}`;
   };
 
-  // กำลังโหลด session
   if (auth.isLoading) {
     return (
       <div className="w-full h-screen flex items-center justify-center bg-gray-50">
@@ -85,7 +90,6 @@ function App() {
     );
   }
 
-  // มี error จาก OIDC
   if (auth.error) {
     return (
       <div className="w-full h-screen flex items-center justify-center bg-red-50">
@@ -103,7 +107,6 @@ function App() {
     );
   }
 
-  // ถ้าล็อกอินแล้ว
   if (auth.isAuthenticated) {
     const idToken = auth.user?.id_token;
 
@@ -118,7 +121,6 @@ function App() {
     );
   }
 
-  // ถ้ายังไม่ล็อกอิน
   return (
     <div className="w-full h-screen flex items-center justify-center bg-gradient-to-br from-blue-500 to-blue-700">
       <div className="bg-white p-12 rounded-2xl shadow-2xl text-center max-w-md">

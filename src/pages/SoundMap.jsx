@@ -4,7 +4,7 @@ import L from "leaflet";
 import { Upload as UploadIcon, Database, Layers as LayersIcon, Filter, Home, List, ChevronRight, Plus } from 'lucide-react';
 
 const FROST_API_URL = "https://dikn83u8md.execute-api.us-east-1.amazonaws.com/frost/get";
-const DATA_API_URL = "https://fkd0kqznyh.execute-api.us-east-1.amazonaws.com";
+const DATA_API_URL = "https://dporrqg75e.execute-api.us-east-1.amazonaws.com";
 const REFRESH_MS = 300000;
 const OFFLINE_MS = 15000;
 
@@ -15,8 +15,7 @@ export default function SoundMap({
   onNavigateToMyThing, 
   idToken, 
   userEmail, 
-  onSignOut,
-  // 🔥 เพิ่ม props สำหรับ navigation ไปหน้า New Dataset
+  signOutRedirect,
   onNavigateToNewDataset 
 }) {
   const mapRef = useRef(null);
@@ -869,20 +868,6 @@ export default function SoundMap({
           </h1>
           
           <div className="flex items-center gap-3">
-            <button
-              onClick={onNavigateToHome || (() => window.location.reload())}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium hover:bg-white/10 transition"
-            >
-              <Home size={16} />
-              Home
-            </button>
-            <button
-              onClick={onNavigateToMyThing}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium hover:bg-white/10 transition"
-            >
-              <List size={16} />
-              My Thing
-            </button>
           </div>
         </div>
 
@@ -942,13 +927,7 @@ export default function SoundMap({
               </>
             )}
           </div>
-          
-          <button
-            onClick={() => alert("API Modal")}
-            className="bg-white/10 px-4 py-2 rounded-md text-sm font-semibold hover:bg-white/20 transition border border-white/20"
-          >
-            Get API
-          </button>
+        
           
           {/* 🔥 เปลี่ยน: เพิ่มปุ่ม New Dataset + Upload สำหรับ General */}
           {dataType === 'general' ? (
@@ -959,13 +938,6 @@ export default function SoundMap({
               >
                 <Plus size={16} />
                 New Dataset
-              </button>
-              <button
-                onClick={onNavigateToUpload}
-                className="flex items-center gap-2 bg-white text-blue-900 px-4 py-2 rounded-md text-sm font-semibold hover:bg-blue-50 transition shadow-sm"
-              >
-                <UploadIcon size={16} />
-                Upload
               </button>
             </>
           ) : (
@@ -981,13 +953,22 @@ export default function SoundMap({
             <div className="flex items-center gap-2 pl-3 border-l border-white/30">
               <span className="text-sm">{userEmail}</span>
               <button
-                onClick={onSignOut}
-                className="bg-red-600 hover:bg-red-700 px-3 py-1.5 rounded-md text-sm font-medium transition"
-              >
-                Sign Out
-              </button>
-            </div>
-          )}
+                onClick={() => {
+                  // เคลียร์ storage ฝั่ง client
+                  sessionStorage.clear();
+                  localStorage.clear();
+                  // เรียกฟังก์ชัน logout ที่ส่งมาจาก App
+                  if (signOutRedirect) {
+                    signOutRedirect();
+                  }
+                }}
+      className="bg-red-600 hover:bg-red-700 px-3 py-1.5 rounded-md text-sm font-medium transition"
+    >
+      Sign Out
+    </button>
+  </div>
+)}
+
         </div>
       </div>
 

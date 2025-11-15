@@ -1,12 +1,14 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Database, X, Plus, Trash2, ChevronRight } from 'lucide-react';
+import { jwtDecode } from 'jwt-decode';
 
 const DATA_API_URL = "https://dporrqg75e.execute-api.us-east-1.amazonaws.com";
 
-export default function NewDataset({ onComplete, onCancel }) {
+export default function NewDataset({ onComplete, onCancel, idToken, userEmail }) {
   const [step, setStep] = useState('dataset');
   const [createdDatasetId, setCreatedDatasetId] = useState(null);
   const [createdDatasetName, setCreatedDatasetName] = useState('');
+  const [ownerId, setOwnerId] = useState(null);
   
   const [datasetForm, setDatasetForm] = useState({
     name: '',
@@ -23,9 +25,35 @@ export default function NewDataset({ onComplete, onCancel }) {
   });
   const [creatingLayer, setCreatingLayer] = useState(false);
 
+  // ดึง owner_id จาก ID Token ของ Cognito
+  useEffect(() => {
+    if (idToken) {
+      try {
+        const decoded = jwtDecode(idToken);
+        // ใช้ sub (subject) จาก Cognito เป็น owner_id
+        // sub คือ unique identifier ของ user ใน Cognito
+        const userId = decoded.sub || decoded['cognito:username'] || userEmail;
+        setOwnerId(userId);
+        console.log('Owner ID from Cognito:', userId);
+      } catch (error) {
+        console.error('Error decoding token:', error);
+        // fallback ถ้า decode ไม่ได้
+        setOwnerId(userEmail || '1');
+      }
+    } else {
+      // fallback ถ้าไม่มี idToken
+      setOwnerId(userEmail || '1');
+    }
+  }, [idToken, userEmail]);
+
   const handleCreateDataset = async () => {
     if (!datasetForm.name.trim()) {
       alert('Please enter dataset name');
+      return;
+    }
+
+    if (!ownerId) {
+      alert('User authentication error. Please try again.');
       return;
     }
 
@@ -35,12 +63,13 @@ export default function NewDataset({ onComplete, onCancel }) {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${idToken}`
         },
         body: JSON.stringify({
           name: datasetForm.name,
           description: datasetForm.description,
           source: datasetForm.source,
-          owner_id: 1
+          owner_id: ownerId // ใช้ owner_id ที่ได้จาก Cognito
         }),
       });
 
@@ -67,49 +96,92 @@ export default function NewDataset({ onComplete, onCancel }) {
     }
   };
 
-  const handleCreateLayer = async () => {
-    if (!layerForm.name.trim()) {
-      alert('Please enter layer name');
-      return;
-    }
+const handleCreateLayer = async () => {
+  if (!layerForm.name.trim()) {
+    alert('Please enter layer name');
+    return;
+  }
 
-    setCreatingLayer(true);
-    try {
-      const response = await fetch(`${DATA_API_URL}/datasets/${createdDatasetId}/layers`, {
+  setCreatingLayer(true);
+
+  // map type ที่ UI ใช้ -> PostgreSQL type ที่ Lambda ใช้ใน virtual view
+  const mapDataType = (type) => {
+    switch (type) {
+      case 'string':
+        return 'text';
+      case 'number':
+        return 'numeric';
+      case 'boolean':
+        return 'boolean';
+      case 'date':
+        return 'timestamp';
+      default:
+        return 'text';
+    }
+  };
+
+  try {
+    const response = await fetch(
+      `${DATA_API_URL}/datasets/${createdDatasetId}/layers`,
+      {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${idToken}`,
         },
         body: JSON.stringify({
-          name: layerForm.name,
-          description: layerForm.description,
-          geom_type: layerForm.geom_type,
-          properties: layerForm.properties.filter(p => p.name.trim())
+          // ให้ตรงกับ Lambda
+          layer_name: layerForm.name,
+          title: layerForm.description || layerForm.name,
+          srid: 4326, // หรือให้ผู้ใช้เลือกเพิ่มทีหลังก็ได้
+          geom_type: layerForm.geom_type.toUpperCase(), // "POINT", "LINESTRING", "POLYGON"
+          fields: layerForm.properties
+            .filter((p) => p.name.trim())
+            .map((p) => ({
+              field_name: p.name.trim(),
+              data_type: mapDataType(p.type),
+              // unit / description ตอนนี้ยังไม่มีใน UI เลยใส่ null ไปก่อน
+              unit: null,
+              description: null,
+            })),
         }),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.message || 'Failed to create layer');
       }
+    );
 
-      const result = await response.json();
-      
-      if (onComplete) {
-        onComplete({
-          datasetId: createdDatasetId,
-          datasetName: createdDatasetName,
-          layerId: result.layer_id || result.id,
-          layerName: layerForm.name
-        });
+    // debug: ดู error text ถ้าไม่ ok
+    const text = await response.text();
+    console.log('create layer status:', response.status, 'body:', text);
+
+    if (!response.ok) {
+      let errorMessage = 'Failed to create layer';
+      try {
+        const errorData = JSON.parse(text);
+        errorMessage = errorData.message || errorMessage;
+      } catch {
+        // ถ้า parse JSON ไม่ได้ ใช้ข้อความดิบจาก text
+        errorMessage = text || errorMessage;
       }
-    } catch (error) {
-      console.error('Error creating layer:', error);
-      alert(`Failed to create layer: ${error.message}`);
-    } finally {
-      setCreatingLayer(false);
+      throw new Error(errorMessage);
     }
-  };
+
+    const result = JSON.parse(text);
+
+    if (onComplete) {
+      onComplete({
+        datasetId: createdDatasetId,
+        datasetName: createdDatasetName,
+        layerId: result.layer_id || result.id,
+        layerName: layerForm.name,
+      });
+    }
+  } catch (error) {
+    console.error('Error creating layer:', error);
+    alert(`Failed to create layer: ${error.message}`);
+  } finally {
+    setCreatingLayer(false);
+  }
+};
+
 
   const addProperty = () => {
     setLayerForm({
@@ -147,6 +219,12 @@ export default function NewDataset({ onComplete, onCancel }) {
             )}
             <h1 className="text-2xl font-bold">DataAPI - Create Dataset</h1>
           </div>
+          {/* แสดง user email ที่ login */}
+          {userEmail && (
+            <div className="text-sm text-blue-200">
+              {userEmail}
+            </div>
+          )}
         </div>
       </div>
 
@@ -249,7 +327,7 @@ export default function NewDataset({ onComplete, onCancel }) {
                   </button>
                   <button
                     onClick={handleCreateDataset}
-                    disabled={creatingDataset}
+                    disabled={creatingDataset || !ownerId}
                     className="px-6 py-3 bg-blue-900 text-white rounded-lg hover:bg-blue-800 transition disabled:opacity-50"
                   >
                     {creatingDataset ? 'Creating...' : 'Create Dataset'}
