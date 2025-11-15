@@ -65,12 +65,6 @@ def serialize_coords(geom_type, coords):
             lines.append(" ".join(f"{x} {y}" for x, y in line))
         return " ".join(lines)
 
-    elif geom_type == "MULTIPOLYGON":
-        polys = []
-        for poly in coords:
-            for ring in poly:
-                polys.append(" ".join(f"{x} {y}" for x, y in ring))
-        return " ".join(polys)
 
     else:
         raise ValueError(f"Unsupported geometry type: {geom_type}")
@@ -142,8 +136,34 @@ def generate_gml(geom_type, coords, srid):
                 </gml:lineStringMember>\n
             """
         gml_data += "</gml:MultiLineString>"
-        print(gml_data)
         return gml_data
+    
+    elif geom_type == 'MULTIPOLYGON':
+        
+        
+        gml_data = f'<gml:MultiPolygon srsName="EPSG:{srid}">\n'
+
+        for polygon in coords:               
+            for ring in polygon:             
+                coord_str = ""
+                for x, y in ring:           
+                    coord_str += f"{x},{y} "
+
+                gml_data += f"""
+                <gml:polygonMember>
+                    <gml:Polygon>
+                        <gml:outerBoundaryIs>
+                            <gml:LinearRing>
+                                <gml:coordinates>{coord_str.strip()}</gml:coordinates>
+                            </gml:LinearRing>
+                        </gml:outerBoundaryIs>
+                    </gml:Polygon>
+                </gml:polygonMember>
+                """
+
+        gml_data += "</gml:MultiPolygon>"
+        return gml_data
+        
 
 
 def lambda_handler(event, context):
@@ -235,16 +255,16 @@ def lambda_handler(event, context):
         print(geom_gml_xml)
 
         xml_data = f"""<?xml version="1.0" encoding="UTF-8"?>
-<wfs:Transaction service="WFS" version="1.1.0"
+<wfs:Transaction service="WFS" version="1.0.0"
     xmlns:wfs="http://www.opengis.net/wfs"
     xmlns:gml="http://www.opengis.net/gml"
     xmlns:{workspace_name}="http://{workspace_name}"
     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
     xsi:schemaLocation="http://www.opengis.net/wfs
-        http://schemas.opengis.net/wfs/1.1.0/wfs.xsd
+        http://schemas.opengis.net/wfs/1.0.0/wfs.xsd
         http://www.opengis.net/gml
         http://schemas.opengis.net/gml/3.1.1/base/gml.xsd
-        {GEOSERVER_URL}/geoserver/wfs/DescribeFeatureType?typename={workspace_name}:{layer_name_xml}">
+        {GEOSERVER_URL}/wfs/DescribeFeatureType?typename={workspace_name}:{layer_name_xml}">
 
   <wfs:Insert>
     <{workspace_name}:{layer_name_xml}>
@@ -263,28 +283,36 @@ def lambda_handler(event, context):
 
         # ส่งไป GeoServer
         response = requests.post(
-            f'{GEOSERVER_URL}/geoserver/wfs',
+            f'{GEOSERVER_URL}/wfs',
             data=xml_data,
             headers={"Content-Type": "text/xml"},
             auth=(GEOSERVER_USER, GEOSERVER_PASSWORD)
         )
         
-        print(response.text)
 
 
         root = ET.fromstring(response.text)
-        ns = {"wfs": "http://www.opengis.net/wfs"}
-        total_inserted = root.find(".//wfs:totalInserted", ns) 
+        ns = {
+            "wfs": "http://www.opengis.net/wfs",
+            "ogc": "http://www.opengis.net/ogc"
+        }
 
 
-        if response.status_code == 200 and total_inserted.text == "1":
-            result = {"success": True, "message": "Feature inserted successfully"}
+        feature_id_elem = root.find(".//wfs:InsertResult/ogc:FeatureId", ns)
+
+        if feature_id_elem is not None:
+            fid = feature_id_elem.get("fid")
+            success = True
+            message = f"Feature inserted successfully"
         else:
-            print("status code", response.status_code)
-            result = {
-                "success": False,
-                "message": f"Insert failed"
-            }
+            success = False
+            message = f"Insert failed: {response.text}"
+
+        result = {
+            "success": success,
+            "message": message
+        }
+
 
         return {
             "statusCode": 200 if result["success"] else 500,
