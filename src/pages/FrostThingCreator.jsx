@@ -1,16 +1,16 @@
 import React, { useState } from 'react';
-import { Plus, Trash2, CheckCircle, Copy, Code, MapPin, Wifi, Server, Download, RefreshCw } from 'lucide-react';
+import { Plus, Trash2, CheckCircle, Copy, Code, MapPin, Wifi, Server, Download, RefreshCw, ArrowLeft } from 'lucide-react';
 
-const API_URL = '<api_url_frost_create>';
+const API_URL = 'https://dikn83u8md.execute-api.us-east-1.amazonaws.com/frost/create';
 
-const FrostThingCreator = ({ onNavigateBack }) => {
+const FrostThingCreator = ({ idToken, onBack }) => {
   const [thingName, setThingName] = useState('');
   const [thingDescription, setThingDescription] = useState('');
   const [location, setLocation] = useState({
     name: '',
     description: '',
-    lat: '13.7560',
-    lon: '100.4920'
+    lat: '13.7563',
+    lon: '100.5018'
   });
   const [sensors, setSensors] = useState([
     {
@@ -78,8 +78,8 @@ const FrostThingCreator = ({ onNavigateBack }) => {
     setLocation({
       name: '',
       description: '',
-      lat: '13.7560',
-      lon: '100.4920'
+      lat: '13.7563',
+      lon: '100.5018'
     });
     setSensors([
       {
@@ -315,6 +315,12 @@ if __name__ == '__main__':
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    
+    if (!idToken) {
+      setError({ message: 'ไม่มี token จากการล็อกอิน' });
+      return;
+    }
+
     setLoading(true);
     setError(null);
     setResult(null);
@@ -335,7 +341,8 @@ if __name__ == '__main__':
       const res = await fetch(API_URL, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${idToken}`
         },
         body: JSON.stringify(payload)
       });
@@ -358,45 +365,47 @@ if __name__ == '__main__':
   const mqttCode = ids ? generateMQTTCode(ids) : '';
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
-      <div className="max-w-6xl mx-auto p-6 space-y-6">
-        {/* Header */}
-        <div className="bg-white rounded-xl shadow-lg p-6 border-t-4 border-blue-600">
-  <div className="flex items-center justify-between">
-    <div className="flex items-center gap-4">
-      {/* ปุ่มกลับหน้า Map */}
-      {onNavigateBack && (
-        <button
-          onClick={onNavigateBack}
-          className="flex items-center gap-2 bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-lg transition-colors"
-        >
-          ← Back to Map
-        </button>
-      )}
-      <div>
-        <h1 className="text-3xl font-bold text-gray-800 flex items-center gap-3">
-          <Server className="text-blue-600" size={32} />
-          FROST-Server Thing Creator
-        </h1>
-        <p className="text-gray-600 mt-2">สร้างและจัดการ IoT Things ผ่าน SensorThings API</p>
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-sky-50 to-cyan-50">
+      {/* 🔥 Header with Back Button */}
+      <div className="bg-white shadow-md border-b border-blue-100">
+        <div className="max-w-6xl mx-auto px-6 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              {onBack && (
+                <button
+                  onClick={onBack}
+                  className="flex items-center gap-2 text-blue-600 hover:text-blue-800 hover:bg-blue-50 px-4 py-2 rounded-lg transition-all font-medium"
+                >
+                  <ArrowLeft size={20} />
+                  กลับ
+                </button>
+              )}
+              <div>
+                <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-3">
+                  <Server className="text-blue-600" size={28} />
+                  FROST Thing Creator
+                </h1>
+                <p className="text-gray-600 text-sm mt-1">สร้างและจัดการ IoT Things ผ่าน SensorThings API</p>
+              </div>
+            </div>
+            {result && (
+              <button
+                onClick={resetForm}
+                className="flex items-center gap-2 bg-blue-100 hover:bg-blue-200 text-blue-700 px-4 py-2 rounded-lg transition-colors font-medium"
+              >
+                <RefreshCw size={16} />
+                สร้างใหม่
+              </button>
+            )}
+          </div>
+        </div>
       </div>
-    </div>
-    {result && (
-      <button
-        onClick={resetForm}
-        className="flex items-center gap-2 bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-lg transition-colors"
-      >
-        <RefreshCw size={16} />
-        สร้างใหม่
-      </button>
-    )}
-  </div>
-</div>
 
+      <div className="max-w-6xl mx-auto p-6 space-y-6">
         {!result ? (
           <form onSubmit={handleSubmit} className="space-y-6">
             {/* Thing info */}
-            <div className="bg-white rounded-xl shadow-md p-6 hover:shadow-lg transition-shadow">
+            <div className="bg-white rounded-xl shadow-md p-6 hover:shadow-lg transition-shadow border border-blue-100">
               <div className="flex items-center gap-2 mb-4">
                 <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
                   <Server className="text-blue-600" size={20} />
@@ -409,7 +418,7 @@ if __name__ == '__main__':
                     ชื่อ Thing <span className="text-red-500">*</span>
                   </label>
                   <input
-                    className="border border-gray-300 rounded-lg w-full p-3 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                    className="border border-blue-200 rounded-lg w-full p-3 focus:ring-2 focus:ring-blue-400 focus:border-transparent transition-all"
                     placeholder="เช่น ESP32 Weather Station"
                     value={thingName}
                     onChange={e => setThingName(e.target.value)}
@@ -421,7 +430,7 @@ if __name__ == '__main__':
                     คำอธิบาย
                   </label>
                   <textarea
-                    className="border border-gray-300 rounded-lg w-full p-3 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                    className="border border-blue-200 rounded-lg w-full p-3 focus:ring-2 focus:ring-blue-400 focus:border-transparent transition-all"
                     placeholder="อธิบายรายละเอียดของอุปกรณ์"
                     rows="3"
                     value={thingDescription}
@@ -432,7 +441,7 @@ if __name__ == '__main__':
             </div>
 
             {/* Location */}
-            <div className="bg-white rounded-xl shadow-md p-6 hover:shadow-lg transition-shadow">
+            <div className="bg-white rounded-xl shadow-md p-6 hover:shadow-lg transition-shadow border border-blue-100">
               <div className="flex items-center gap-2 mb-4">
                 <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
                   <MapPin className="text-green-600" size={20} />
@@ -446,7 +455,7 @@ if __name__ == '__main__':
                       ชื่อสถานที่
                     </label>
                     <input
-                      className="border border-gray-300 rounded-lg w-full p-3 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                      className="border border-blue-200 rounded-lg w-full p-3 focus:ring-2 focus:ring-blue-400 focus:border-transparent transition-all"
                       placeholder="เช่น Building A, Floor 3"
                       value={location.name}
                       onChange={e => setLocation({ ...location, name: e.target.value })}
@@ -457,7 +466,7 @@ if __name__ == '__main__':
                       คำอธิบายสถานที่
                     </label>
                     <input
-                      className="border border-gray-300 rounded-lg w-full p-3 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                      className="border border-blue-200 rounded-lg w-full p-3 focus:ring-2 focus:ring-blue-400 focus:border-transparent transition-all"
                       placeholder="รายละเอียดเพิ่มเติม"
                       value={location.description}
                       onChange={e => setLocation({ ...location, description: e.target.value })}
@@ -472,8 +481,8 @@ if __name__ == '__main__':
                     <input
                       type="number"
                       step="any"
-                      className="border border-gray-300 rounded-lg w-full p-3 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-                      placeholder="13.7560"
+                      className="border border-blue-200 rounded-lg w-full p-3 focus:ring-2 focus:ring-blue-400 focus:border-transparent transition-all"
+                      placeholder="13.7563"
                       value={location.lat}
                       onChange={e => setLocation({ ...location, lat: e.target.value })}
                     />
@@ -485,8 +494,8 @@ if __name__ == '__main__':
                     <input
                       type="number"
                       step="any"
-                      className="border border-gray-300 rounded-lg w-full p-3 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-                      placeholder="100.4920"
+                      className="border border-blue-200 rounded-lg w-full p-3 focus:ring-2 focus:ring-blue-400 focus:border-transparent transition-all"
+                      placeholder="100.5018"
                       value={location.lon}
                       onChange={e => setLocation({ ...location, lon: e.target.value })}
                     />
@@ -496,7 +505,7 @@ if __name__ == '__main__':
             </div>
 
             {/* Sensors / Datastreams */}
-            <div className="bg-white rounded-xl shadow-md p-6 hover:shadow-lg transition-shadow">
+            <div className="bg-white rounded-xl shadow-md p-6 hover:shadow-lg transition-shadow border border-blue-100">
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
                   <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center">
@@ -516,10 +525,10 @@ if __name__ == '__main__':
 
               <div className="space-y-4">
                 {sensors.map((sensor, idx) => (
-                  <div key={sensor.id} className="border-2 border-gray-200 rounded-xl p-5 hover:border-purple-300 transition-all bg-gradient-to-br from-white to-purple-50">
+                  <div key={sensor.id} className="border-2 border-blue-100 rounded-xl p-5 hover:border-blue-300 transition-all bg-gradient-to-br from-white to-blue-50">
                     <div className="flex items-center justify-between mb-4">
                       <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 bg-purple-600 text-white rounded-full flex items-center justify-center font-bold">
+                        <div className="w-8 h-8 bg-blue-600 text-white rounded-full flex items-center justify-center font-bold">
                           {idx + 1}
                         </div>
                         <span className="font-semibold text-gray-700">
@@ -539,17 +548,17 @@ if __name__ == '__main__':
 
                     <div className="space-y-4">
                       {/* Datastream Info */}
-                      <div className="bg-white rounded-lg p-4 border border-purple-200">
-                        <h3 className="text-sm font-semibold text-purple-700 mb-3">📊 ข้อมูล Datastream</h3>
+                      <div className="bg-white rounded-lg p-4 border border-blue-200">
+                        <h3 className="text-sm font-semibold text-blue-700 mb-3">📊 ข้อมูล Datastream</h3>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                           <input
-                            className="border border-gray-300 rounded-lg w-full p-2 text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                            className="border border-blue-200 rounded-lg w-full p-2 text-sm focus:ring-2 focus:ring-blue-400 focus:border-transparent"
                             placeholder="ชื่อ Datastream (เช่น Temperature)"
                             value={sensor.name}
                             onChange={e => handleSensorChange(sensor.id, 'name', e.target.value)}
                           />
                           <input
-                            className="border border-gray-300 rounded-lg w-full p-2 text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                            className="border border-blue-200 rounded-lg w-full p-2 text-sm focus:ring-2 focus:ring-blue-400 focus:border-transparent"
                             placeholder="คำอธิบาย Datastream"
                             value={sensor.description}
                             onChange={e => handleSensorChange(sensor.id, 'description', e.target.value)}
@@ -558,17 +567,17 @@ if __name__ == '__main__':
                       </div>
 
                       {/* Observed Property */}
-                      <div className="bg-white rounded-lg p-4 border border-blue-200">
-                        <h3 className="text-sm font-semibold text-blue-700 mb-3">🔬 Observed Property</h3>
+                      <div className="bg-white rounded-lg p-4 border border-cyan-200">
+                        <h3 className="text-sm font-semibold text-cyan-700 mb-3">🔬 Observed Property</h3>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                           <input
-                            className="border border-gray-300 rounded-lg w-full p-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            className="border border-blue-200 rounded-lg w-full p-2 text-sm focus:ring-2 focus:ring-blue-400 focus:border-transparent"
                             placeholder="ชื่อ Property (เช่น Air Temperature)"
                             value={sensor.propertyName}
                             onChange={e => handleSensorChange(sensor.id, 'propertyName', e.target.value)}
                           />
                           <input
-                            className="border border-gray-300 rounded-lg w-full p-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            className="border border-blue-200 rounded-lg w-full p-2 text-sm focus:ring-2 focus:ring-blue-400 focus:border-transparent"
                             placeholder="Definition URL"
                             value={sensor.propertyDefinition}
                             onChange={e => handleSensorChange(sensor.id, 'propertyDefinition', e.target.value)}
@@ -581,19 +590,19 @@ if __name__ == '__main__':
                         <h3 className="text-sm font-semibold text-green-700 mb-3">📏 หน่วยการวัด</h3>
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                           <input
-                            className="border border-gray-300 rounded-lg w-full p-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                            className="border border-blue-200 rounded-lg w-full p-2 text-sm focus:ring-2 focus:ring-blue-400 focus:border-transparent"
                             placeholder="หน่วย (degree Celsius)"
                             value={sensor.unit}
                             onChange={e => handleSensorChange(sensor.id, 'unit', e.target.value)}
                           />
                           <input
-                            className="border border-gray-300 rounded-lg w-full p-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                            className="border border-blue-200 rounded-lg w-full p-2 text-sm focus:ring-2 focus:ring-blue-400 focus:border-transparent"
                             placeholder="สัญลักษณ์ (°C)"
                             value={sensor.symbol}
                             onChange={e => handleSensorChange(sensor.id, 'symbol', e.target.value)}
                           />
                           <input
-                            className="border border-gray-300 rounded-lg w-full p-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                            className="border border-blue-200 rounded-lg w-full p-2 text-sm focus:ring-2 focus:ring-blue-400 focus:border-transparent"
                             placeholder="Definition URL"
                             value={sensor.unitDefinition}
                             onChange={e => handleSensorChange(sensor.id, 'unitDefinition', e.target.value)}
@@ -606,13 +615,13 @@ if __name__ == '__main__':
                         <h3 className="text-sm font-semibold text-orange-700 mb-3">🔌 ข้อมูลเซนเซอร์</h3>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                           <input
-                            className="border border-gray-300 rounded-lg w-full p-2 text-sm focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                            className="border border-blue-200 rounded-lg w-full p-2 text-sm focus:ring-2 focus:ring-blue-400 focus:border-transparent"
                             placeholder="ชื่อเซนเซอร์ (DHT22, BMP280)"
                             value={sensor.sensorName}
                             onChange={e => handleSensorChange(sensor.id, 'sensorName', e.target.value)}
                           />
                           <input
-                            className="border border-gray-300 rounded-lg w-full p-2 text-sm focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                            className="border border-blue-200 rounded-lg w-full p-2 text-sm focus:ring-2 focus:ring-blue-400 focus:border-transparent"
                             placeholder="คำอธิบายเซนเซอร์"
                             value={sensor.sensorDescription}
                             onChange={e => handleSensorChange(sensor.id, 'sensorDescription', e.target.value)}
@@ -628,7 +637,7 @@ if __name__ == '__main__':
             <button
               type="submit"
               disabled={loading}
-              className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white px-6 py-4 rounded-xl font-semibold text-lg shadow-lg hover:shadow-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              className="w-full bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 text-white px-6 py-4 rounded-xl font-semibold text-lg shadow-lg hover:shadow-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
               {loading ? (
                 <>
@@ -700,7 +709,7 @@ if __name__ == '__main__':
                       )}
                     </button>
                   </div>
-                  <code className="text-sm bg-gradient-to-r from-gray-100 to-gray-50 px-3 py-2 rounded-lg block font-mono border border-gray-200">
+                  <code className="text-sm bg-gradient-to-r from-blue-50 to-cyan-50 px-3 py-2 rounded-lg block font-mono border border-blue-200">
                     {ids.thingId}
                   </code>
                 </div>
@@ -715,7 +724,7 @@ if __name__ == '__main__':
                   </span>
                   <div className="space-y-2">
                     {ids.locationIds.map((locId, idx) => (
-                      <div key={idx} className="flex items-center justify-between bg-gradient-to-r from-gray-50 to-white p-2 rounded-lg border border-gray-200">
+                      <div key={idx} className="flex items-center justify-between bg-gradient-to-r from-green-50 to-emerald-50 p-2 rounded-lg border border-green-200">
                         <code className="text-sm font-mono flex-1">{locId}</code>
                         <button
                           onClick={() => copyToClipboard(locId, `loc-${locId}`)}
@@ -742,7 +751,7 @@ if __name__ == '__main__':
                   </span>
                   <div className="space-y-3">
                     {ids.datastreamIds.map((ds, idx) => (
-                      <div key={idx} className="border-l-4 border-purple-400 bg-gradient-to-r from-purple-50 to-white p-4 rounded-lg shadow-sm">
+                      <div key={idx} className="border-l-4 border-purple-400 bg-gradient-to-r from-purple-50 to-blue-50 p-4 rounded-lg shadow-sm">
                         <div className="font-semibold text-purple-800 mb-3 flex items-center gap-2">
                           <div className="w-6 h-6 bg-purple-600 text-white rounded-full flex items-center justify-center text-xs font-bold">
                             {idx + 1}
@@ -755,7 +764,7 @@ if __name__ == '__main__':
                           <div className="flex items-center justify-between text-sm">
                             <span className="text-gray-600 font-medium">Datastream ID:</span>
                             <div className="flex items-center gap-2">
-                              <code className="bg-white px-2 py-1 rounded border border-gray-200 text-xs font-mono">
+                              <code className="bg-white px-2 py-1 rounded border border-blue-200 text-xs font-mono">
                                 {ds.id}
                               </code>
                               <button
@@ -776,7 +785,7 @@ if __name__ == '__main__':
                             <div className="flex items-center justify-between text-sm">
                               <span className="text-gray-600 font-medium">Sensor ID:</span>
                               <div className="flex items-center gap-2">
-                                <code className="bg-white px-2 py-1 rounded border border-gray-200 text-xs font-mono">
+                                <code className="bg-white px-2 py-1 rounded border border-blue-200 text-xs font-mono">
                                   {ds.sensorId}
                                 </code>
                                 <button
@@ -798,7 +807,7 @@ if __name__ == '__main__':
                             <div className="flex items-center justify-between text-sm">
                               <span className="text-gray-600 font-medium">ObservedProperty ID:</span>
                               <div className="flex items-center gap-2">
-                                <code className="bg-white px-2 py-1 rounded border border-gray-200 text-xs font-mono">
+                                <code className="bg-white px-2 py-1 rounded border border-blue-200 text-xs font-mono">
                                   {ds.observedPropertyId}
                                 </code>
                                 <button
@@ -826,7 +835,7 @@ if __name__ == '__main__':
                 <summary className="font-semibold text-gray-700 cursor-pointer hover:text-blue-600 transition-colors">
                   📄 ดู Response แบบเต็ม (JSON)
                 </summary>
-                <pre className="text-xs text-gray-600 mt-3 overflow-auto max-h-96 bg-gray-50 p-3 rounded border border-gray-200 font-mono">
+                <pre className="text-xs text-gray-600 mt-3 overflow-auto max-h-96 bg-blue-50 p-3 rounded border border-blue-200 font-mono">
                   {JSON.stringify(result, null, 2)}
                 </pre>
               </details>
