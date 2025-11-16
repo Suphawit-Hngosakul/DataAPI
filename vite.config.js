@@ -4,14 +4,8 @@ import tailwindcss from '@tailwindcss/vite'
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [
-    react(),
-    tailwindcss()
-  ],
+  plugins: [react(), tailwindcss()],
   server: {
     port: 3000,
-  },
-  define: {
-    global: {}, // 👈 เพิ่มบรรทัดนี้
   },
 })
