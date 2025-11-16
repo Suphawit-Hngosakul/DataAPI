@@ -26,7 +26,36 @@ DATA_TYPE_MAP = {
     'text': str,
     'varchar': str,
     'timestamp': str,
-    'boolean': bool
+    'boolean': bool,
+    # Array types
+    'integer[]': list,
+    'bigint[]': list,
+    'numeric[]': list,
+    'real[]': list,
+    'double precision[]': list,
+    'text[]': list,
+    'varchar[]': list,
+    'character varying[]': list,
+    '_int4': list,  
+    '_int8': list,
+    '_text': list,
+    '_varchar': list,
+}
+
+# Map array types to element types
+ARRAY_ELEMENT_TYPE_MAP = {
+    'integer[]': int,
+    'bigint[]': int,
+    'numeric[]': float,
+    'real[]': float,
+    'double precision[]': float,
+    'text[]': str,
+    'varchar[]': str,
+    'character varying[]': str,
+    '_int4': int,
+    '_int8': int,
+    '_text': str,
+    '_varchar': str,
 }
 
 VALID_GEOM_TYPES = ['POINT', 'LINESTRING', 'POLYGON', 
@@ -35,6 +64,40 @@ VALID_GEOM_TYPES = ['POINT', 'LINESTRING', 'POLYGON',
 def to_pascal_case(s):
     # แปลง string เป็น PascalCase สำหรับ GML element
     return "".join(word.capitalize() for word in s.lower().split("_"))
+
+def is_array_type(data_type):
+    """Check if data_type is an array type"""
+    data_type_lower = data_type.lower()
+    return data_type_lower.endswith('[]') or data_type_lower.startswith('_')
+
+def validate_array_elements(array_value, element_type, field_name):
+    """Validate all elements in array match expected type"""
+    errors = []
+    if not isinstance(array_value, list):
+        errors.append(f"Field '{field_name}' expects array (list), got {type(array_value).__name__}")
+        return errors
+    
+    for idx, elem in enumerate(array_value):
+        if elem is None:
+            continue  # NULL values allowed in arrays
+        
+        if element_type == int:
+            if not isinstance(elem, int):
+                # Allow float 
+                if isinstance(elem, float) and elem.is_integer():
+                    continue
+                errors.append(f"Field '{field_name}[{idx}]' expects int, got {type(elem).__name__}: {elem}")
+        elif element_type == float:
+            if not isinstance(elem, (int, float)):
+                errors.append(f"Field '{field_name}[{idx}]' expects number, got {type(elem).__name__}: {elem}")
+        elif element_type == str:
+            if not isinstance(elem, str):
+                errors.append(f"Field '{field_name}[{idx}]' expects string, got {type(elem).__name__}: {elem}")
+        else:
+            if not isinstance(elem, element_type):
+                errors.append(f"Field '{field_name}[{idx}]' expects {element_type.__name__}, got {type(elem).__name__}: {elem}")
+    
+    return errors
 
 def serialize_coords(geom_type, coords):
     geom_type = geom_type.upper()
@@ -163,7 +226,6 @@ def generate_gml(geom_type, coords, srid):
 
         gml_data += "</gml:MultiPolygon>"
         return gml_data
-        
 
 
 def lambda_handler(event, context):
@@ -200,21 +262,42 @@ def lambda_handler(event, context):
             if key not in db_fields:
                 errors.append(f"Field '{key}' not defined for layer {layer_id}")
                 continue
+            
             expected_type = db_fields[key].lower()
-            py_type = DATA_TYPE_MAP.get(expected_type)
-            if not py_type:
-                errors.append(f"Unknown DB type '{expected_type}' for field '{key}'")
-                continue
-            # numeric accept int or float
-            if expected_type == "numeric":
-                if not isinstance(value, (int, float)):
-                    errors.append(f"Field '{key}' expects {expected_type}, got {type(value).__name__}")
-            elif not isinstance(value, py_type):
-                # allow float with integer value for int fields
-                if py_type == int and isinstance(value, float) and value.is_integer():
+            
+            # Check if it an array type
+            if is_array_type(expected_type):
+                py_type = DATA_TYPE_MAP.get(expected_type)
+                if not py_type:
+                    errors.append(f"Unknown array type '{expected_type}' for field '{key}'")
                     continue
-                errors.append(f"Field '{key}' expects {expected_type}, got {type(value).__name__}")
-
+                
+                # Validateb list
+                if not isinstance(value, list):
+                    errors.append(f"Field '{key}' expects array (list), got {type(value).__name__}")
+                    continue
+                
+                # Validate array elements
+                element_type = ARRAY_ELEMENT_TYPE_MAP.get(expected_type)
+                if element_type:
+                    element_errors = validate_array_elements(value, element_type, key)
+                    errors.extend(element_errors)
+            else:
+                # Non-array type validation 
+                py_type = DATA_TYPE_MAP.get(expected_type)
+                if not py_type:
+                    errors.append(f"Unknown DB type '{expected_type}' for field '{key}'")
+                    continue
+                
+                # numeric accept int or float
+                if expected_type == "numeric":
+                    if not isinstance(value, (int, float)):
+                        errors.append(f"Field '{key}' expects {expected_type}, got {type(value).__name__}")
+                elif not isinstance(value, py_type):
+                    # allow float with integer value for int fields
+                    if py_type == int and isinstance(value, float) and value.is_integer():
+                        continue
+                    errors.append(f"Field '{key}' expects {expected_type}, got {type(value).__name__}")
 
         # Validate geom
         cur.execute("SELECT name, geom_type, srid, dataset_id FROM layers WHERE layer_id = %s", (layer_id,))
@@ -289,14 +372,11 @@ def lambda_handler(event, context):
             auth=(GEOSERVER_USER, GEOSERVER_PASSWORD)
         )
         
-
-
         root = ET.fromstring(response.text)
         ns = {
             "wfs": "http://www.opengis.net/wfs",
             "ogc": "http://www.opengis.net/ogc"
         }
-
 
         feature_id_elem = root.find(".//wfs:InsertResult/ogc:FeatureId", ns)
 
@@ -313,11 +393,13 @@ def lambda_handler(event, context):
             "message": message
         }
 
-
         return {
             "statusCode": 200 if result["success"] else 500,
             "body": json.dumps(result)
         }
 
     except Exception as e:
+        import traceback
+        print(f"Error: {str(e)}")
+        print(traceback.format_exc())
         return {"statusCode": 500, "body": json.dumps({"error": str(e)})}
