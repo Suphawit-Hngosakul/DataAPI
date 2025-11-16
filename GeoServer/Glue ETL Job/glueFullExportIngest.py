@@ -25,7 +25,7 @@ job.init(args['JOB_NAME'], args)
 # API Configuration
 API_BASE_URL = "https://mhi9gvthfj.execute-api.us-east-1.amazonaws.com"
 OWNER_ID = 2  # Fixed owner_id
-cipher = Fernet("MVSGHM2Qk1NN_lwbRIVWK--6aR-MXZM8lDifO2qXTKo=")
+cipher = Fernet("<REPLACE THIS WITH ACTUAL KEY>")
 
 
 
