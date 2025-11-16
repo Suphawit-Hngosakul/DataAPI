@@ -16,11 +16,16 @@ export default function SoundMap({
   idToken, 
   userEmail, 
   signOutRedirect,
-  onNavigateToNewDataset 
+  onNavigateToNewDataset,
+  onNavigateToNewLayer,
+  onNavigateToAddFeature // 🔥 เพิ่ม prop
 }) {
   const mapRef = useRef(null);
   const frostMarkers = useRef(new Map());
   const projectLayersRef = useRef(new Map());
+  
+  const sensorLayerGroup = useRef(null);
+  const projectLayerGroup = useRef(null);
   
   const [sensors, setSensors] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -34,7 +39,6 @@ export default function SoundMap({
   // === Projects/Layers State ===
   const [projects, setProjects] = useState([]);
   const [selectedProjectId, setSelectedProjectId] = useState(null);
-  // 🔥 เพิ่ม state สำหรับ project detail view
   const [selectedProject, setSelectedProject] = useState(null);
   const [layers, setLayers] = useState([]);
   const [selectedLayers, setSelectedLayers] = useState(new Set());
@@ -43,10 +47,9 @@ export default function SoundMap({
   const [projectPanelCollapsed, setProjectPanelCollapsed] = useState(false);
   const [loadingProjects, setLoadingProjects] = useState(false);
   const [showCqlInput, setShowCqlInput] = useState(false);
-  // 🔥 เพิ่ม state สำหรับ view mode (list/detail)
   const [viewMode, setViewMode] = useState('list');
 
-  // === Initialize map ===
+  // === Initialize map with Layer Groups ===
   useEffect(() => {
     const map = L.map("map", {
       zoomAnimation: true,
@@ -59,8 +62,12 @@ export default function SoundMap({
       attribution: "© OpenStreetMap contributors",
     }).addTo(map);
 
+    sensorLayerGroup.current = L.layerGroup().addTo(map);
+    projectLayerGroup.current = L.layerGroup();
+
     mapRef.current = map;
     setTimeout(() => map.invalidateSize(), 200);
+    
     return () => map.remove();
   }, []);
 
@@ -213,14 +220,14 @@ export default function SoundMap({
             const m = L.circleMarker([lat, lon], style)
               .bindPopup(html)
               .on("click", () => setCurrentSensor(thing))
-              .addTo(mapRef.current);
+              .addTo(sensorLayerGroup.current);
             frostMarkers.current.set(id, m);
           }
         });
 
         for (const [id, m] of frostMarkers.current.entries()) {
           if (!ids.has(id)) {
-            mapRef.current.removeLayer(m);
+            sensorLayerGroup.current.removeLayer(m);
             frostMarkers.current.delete(id);
           }
         }
@@ -248,7 +255,6 @@ export default function SoundMap({
       setLoadingProjects(true);
       const response = await fetch(`${DATA_API_URL}/datasets`);
       const data = await response.json();
-      // 🔥 รองรับทั้ง array และ object response
       const projectsData = Array.isArray(data) ? data : (data.datasets || []);
       setProjects(projectsData);
     } catch (error) {
@@ -263,7 +269,6 @@ export default function SoundMap({
     try {
       const response = await fetch(`${DATA_API_URL}/datasets/${datasetId}/layers`);
       const data = await response.json();
-      // 🔥 รองรับทั้ง array และ object response
       const layersData = Array.isArray(data) ? data : (data.layers || []);
       setLayers(layersData);
     } catch (error) {
@@ -288,24 +293,38 @@ export default function SoundMap({
     }
   };
 
-  // 🔥 แก้ไข: เพิ่ม reset states เมื่อเปลี่ยน dataType
   useEffect(() => {
     if (dataType === 'general') {
+      if (sensorLayerGroup.current && mapRef.current) {
+        mapRef.current.removeLayer(sensorLayerGroup.current);
+      }
+      
+      if (projectLayerGroup.current && mapRef.current) {
+        projectLayerGroup.current.addTo(mapRef.current);
+      }
+      
       fetchProjects();
       setShowProjectPanel(true);
-      // Reset states
       setViewMode('list');
       setSelectedProjectId(null);
       setSelectedProject(null);
       setLayers([]);
       setSelectedLayers(new Set());
       
-      // Clear existing layers
       projectLayersRef.current.forEach(layer => {
-        if (mapRef.current) mapRef.current.removeLayer(layer);
+        projectLayerGroup.current.removeLayer(layer);
       });
       projectLayersRef.current.clear();
-    } else {
+      
+    } else if (dataType === 'sensor') {
+      if (sensorLayerGroup.current && mapRef.current) {
+        sensorLayerGroup.current.addTo(mapRef.current);
+      }
+      
+      if (projectLayerGroup.current && mapRef.current) {
+        mapRef.current.removeLayer(projectLayerGroup.current);
+      }
+      
       setShowProjectPanel(false);
     }
   }, [dataType]);
@@ -316,13 +335,12 @@ export default function SoundMap({
       setSelectedLayers(new Set());
       
       projectLayersRef.current.forEach(layer => {
-        if (mapRef.current) mapRef.current.removeLayer(layer);
+        if (projectLayerGroup.current) projectLayerGroup.current.removeLayer(layer);
       });
       projectLayersRef.current.clear();
     }
   }, [selectedProjectId]);
 
-  // 🔥 แก้ไข: รองรับทั้ง layer_id และ id
   const toggleLayer = async (layer) => {
     const layerId = layer.layer_id || layer.id;
     const newSelected = new Set(selectedLayers);
@@ -330,8 +348,8 @@ export default function SoundMap({
     if (newSelected.has(layerId)) {
       newSelected.delete(layerId);
       const leafletLayer = projectLayersRef.current.get(layerId);
-      if (leafletLayer && mapRef.current) {
-        mapRef.current.removeLayer(leafletLayer);
+      if (leafletLayer && projectLayerGroup.current) {
+        projectLayerGroup.current.removeLayer(leafletLayer);
         projectLayersRef.current.delete(layerId);
       }
     } else {
@@ -339,10 +357,9 @@ export default function SoundMap({
       
       const features = await fetchFeatures(selectedProjectId, layerId, cqlFilter);
       
-      if (features && features.features && features.features.length > 0 && mapRef.current) {
+      if (features && features.features && features.features.length > 0 && projectLayerGroup.current) {
         const geoJsonLayer = L.geoJSON(features, {
           pointToLayer: (feature, latlng) => {
-            // 🔥 แก้ไข: ใช้สีตาม noise_level ถ้ามี
             const props = feature.properties || {};
             const value = parseFloat(props.noise_level || props.value || 0);
             const color = colorByDb(value);
@@ -388,12 +405,12 @@ export default function SoundMap({
             popupContent += '</div>';
             layer.bindPopup(popupContent, { maxWidth: 300 });
           }
-        }).addTo(mapRef.current);
+        }).addTo(projectLayerGroup.current);
         
         projectLayersRef.current.set(layerId, geoJsonLayer);
         
         const bounds = geoJsonLayer.getBounds();
-        if (bounds.isValid()) {
+        if (bounds.isValid() && mapRef.current) {
           mapRef.current.fitBounds(bounds, { padding: [50, 50] });
         }
       }
@@ -405,9 +422,9 @@ export default function SoundMap({
   const applyCqlFilter = async () => {
     for (const layerId of selectedLayers) {
       const layer = layers.find(l => (l.layer_id || l.id) === layerId);
-      if (layer && mapRef.current) {
+      if (layer && projectLayerGroup.current) {
         const existingLayer = projectLayersRef.current.get(layerId);
-        if (existingLayer) mapRef.current.removeLayer(existingLayer);
+        if (existingLayer) projectLayerGroup.current.removeLayer(existingLayer);
         
         const features = await fetchFeatures(selectedProjectId, layerId, cqlFilter);
         
@@ -459,7 +476,7 @@ export default function SoundMap({
               popupContent += '</div>';
               layer.bindPopup(popupContent, { maxWidth: 300 });
             }
-          }).addTo(mapRef.current);
+          }).addTo(projectLayerGroup.current);
           
           projectLayersRef.current.set(layerId, geoJsonLayer);
         }
@@ -929,7 +946,6 @@ export default function SoundMap({
           </div>
         
           
-          {/* 🔥 เปลี่ยน: เพิ่มปุ่ม New Dataset + Upload สำหรับ General */}
           {dataType === 'general' ? (
             <>
               <button
@@ -954,21 +970,18 @@ export default function SoundMap({
               <span className="text-sm">{userEmail}</span>
               <button
                 onClick={() => {
-                  // เคลียร์ storage ฝั่ง client
                   sessionStorage.clear();
                   localStorage.clear();
-                  // เรียกฟังก์ชัน logout ที่ส่งมาจาก App
                   if (signOutRedirect) {
                     signOutRedirect();
                   }
                 }}
-      className="bg-red-600 hover:bg-red-700 px-3 py-1.5 rounded-md text-sm font-medium transition"
-    >
-      Sign Out
-    </button>
-  </div>
-)}
-
+                className="bg-red-600 hover:bg-red-700 px-3 py-1.5 rounded-md text-sm font-medium transition"
+              >
+                Sign Out
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -1082,7 +1095,7 @@ export default function SoundMap({
           </div>
         )}
 
-        {/* 🔥 Projects Panel - เปลี่ยนจาก dropdown เป็น list/detail view */}
+        {/* Projects Panel */}
         {dataType === 'general' && showProjectPanel && (
           <div
             className={`absolute top-4 right-4 bg-white rounded-xl shadow-xl overflow-hidden transition-all ${
@@ -1091,7 +1104,6 @@ export default function SoundMap({
             style={{ zIndex: 1000 }}
           >
             <div className={`flex justify-between items-center bg-[#1E3A8A] text-white px-4 py-3 ${projectPanelCollapsed ? 'rounded-xl' : 'rounded-t-xl'}`}>
-              {/* 🔥 เพิ่ม: ปุ่มกลับเมื่ออยู่ใน detail view */}
               {viewMode === 'detail' && !projectPanelCollapsed && (
                 <button
                   onClick={() => {
@@ -1101,7 +1113,7 @@ export default function SoundMap({
                     setLayers([]);
                     setSelectedLayers(new Set());
                     projectLayersRef.current.forEach(layer => {
-                      if (mapRef.current) mapRef.current.removeLayer(layer);
+                      if (projectLayerGroup.current) projectLayerGroup.current.removeLayer(layer);
                     });
                     projectLayersRef.current.clear();
                   }}
@@ -1130,7 +1142,6 @@ export default function SoundMap({
                     Loading projects...
                   </div>
                 ) : viewMode === 'list' ? (
-                  /* 🔥 เพิ่ม: List View - แสดงรายการ Projects */
                   <div className="p-2">
                     {projects.length === 0 ? (
                       <p className="text-center text-gray-500 py-8 text-sm">No projects found</p>
@@ -1160,7 +1171,6 @@ export default function SoundMap({
                     )}
                   </div>
                 ) : (
-                  /* 🔥 เพิ่ม: Detail View - แสดง Layers ของ Project ที่เลือก */
                   <div className="p-4 space-y-4">
                     <div>
                       <p className="text-xs text-gray-500 mb-1">Project Info</p>
@@ -1173,30 +1183,73 @@ export default function SoundMap({
                           <LayersIcon size={16} />
                           Layers
                         </label>
-                        <span className="text-xs text-gray-500">{selectedLayers.size} selected</span>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => {
+                              if (onNavigateToNewLayer) {
+                                onNavigateToNewLayer({
+                                  datasetId: selectedProjectId,
+                                  datasetName: selectedProject?.name
+                                });
+                              }
+                            }}
+                            className="flex items-center gap-1 text-xs text-[#1E3A8A] hover:text-blue-700 font-semibold bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-md transition"
+                          >
+                            <Plus size={14} />
+                            Add Layer
+                          </button>
+                          <span className="text-xs text-gray-500">{selectedLayers.size} selected</span>
+                        </div>
                       </div>
 
                       {layers.length === 0 ? (
                         <p className="text-sm text-gray-500 text-center py-4">No layers found</p>
                       ) : (
                         <div className="space-y-2 max-h-60 overflow-y-auto">
+                          {/* 🔥 เปลี่ยนโครงสร้าง layer item */}
                           {layers.map((layer) => (
-                            <label
+                            <div
                               key={layer.layer_id || layer.id}
-                              className="flex items-start gap-3 p-3 rounded-lg hover:bg-blue-50 cursor-pointer border border-gray-200 transition"
+                              className="p-3 rounded-lg border border-gray-200 transition"
                             >
-                              <input
-                                type="checkbox"
-                                checked={selectedLayers.has(layer.layer_id || layer.id)}
-                                onChange={() => toggleLayer(layer)}
-                                className="mt-1 w-4 h-4 text-[#1E3A8A] rounded focus:ring-[#1E3A8A]"
-                              />
-                              <div className="flex-1">
-                                <div className="font-medium text-sm text-gray-800">{layer.name}</div>
-                                {layer.description && <div className="text-xs text-gray-500 mt-1">{layer.description}</div>}
-                                <div className="text-xs text-gray-400 mt-1">{layer.geom_type || 'GEOMETRY'}</div>
+                              <div className="flex items-start gap-3">
+                                <input
+                                  type="checkbox"
+                                  checked={selectedLayers.has(layer.layer_id || layer.id)}
+                                  onChange={() => toggleLayer(layer)}
+                                  className="mt-1 w-4 h-4 text-[#1E3A8A] rounded focus:ring-[#1E3A8A]"
+                                />
+                                <div className="flex-1">
+                                  <div className="font-medium text-sm text-gray-800">{layer.name}</div>
+                                  {layer.description && <div className="text-xs text-gray-500 mt-1">{layer.description}</div>}
+                                  <div className="text-xs text-gray-400 mt-1">
+                                  {layer.geom?.type || layer.geom_type || 'GEOMETRY'} {/* 🔥 แก้ตรงนี้ */}
+                                </div>
+                                  
+                                  {/* 🔥 เพิ่มปุ่ม Add Data */}
+                                  <button
+                                   type="button"
+                                   onClick={() => {
+                                   if (onNavigateToAddFeature) {
+                                   onNavigateToAddFeature({
+                                   datasetId: selectedProjectId,
+                                   datasetName: selectedProject?.name,
+                                   layerId: layer.layer_id || layer.id,
+                                   layerName: layer.name,
+                                   layerSchema: layer.schema,
+                                   geomType: layer.geom?.type || layer.geom_type,
+                                   srid: layer.geom?.srid || 4326
+                                       });
+                                     }
+                                   }}
+                                   className="mt-2 inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 hover:bg-blue-100 font-medium px-2 py-1 rounded transition"
+                                    >
+                                    <Plus size={12} />
+                                  Add Data
+                              </button>
+                                </div>
                               </div>
-                            </label>
+                            </div>
                           ))}
                         </div>
                       )}

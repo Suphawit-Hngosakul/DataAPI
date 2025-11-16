@@ -4,10 +4,16 @@ import { jwtDecode } from 'jwt-decode';
 
 const DATA_API_URL = "https://dporrqg75e.execute-api.us-east-1.amazonaws.com";
 
-export default function NewDataset({ onComplete, onCancel, idToken, userEmail }) {
-  const [step, setStep] = useState('dataset');
-  const [createdDatasetId, setCreatedDatasetId] = useState(null);
-  const [createdDatasetName, setCreatedDatasetName] = useState('');
+export default function NewDataset({ 
+  onComplete, 
+  onCancel, 
+  idToken, 
+  userEmail,
+  existingDataset // 🔥 เพิ่ม prop สำหรับ dataset ที่มีอยู่แล้ว
+}) {
+  const [step, setStep] = useState(existingDataset ? 'layer' : 'dataset'); // 🔥 ถ้ามี existingDataset ข้ามไปหน้า layer เลย
+  const [createdDatasetId, setCreatedDatasetId] = useState(existingDataset?.datasetId || null); // 🔥 ใช้ dataset ที่มีอยู่
+  const [createdDatasetName, setCreatedDatasetName] = useState(existingDataset?.datasetName || ''); // 🔥 ใช้ชื่อ dataset ที่มีอยู่
   const [ownerId, setOwnerId] = useState(null);
   
   const [datasetForm, setDatasetForm] = useState({
@@ -25,23 +31,18 @@ export default function NewDataset({ onComplete, onCancel, idToken, userEmail })
   });
   const [creatingLayer, setCreatingLayer] = useState(false);
 
-  // ดึง owner_id จาก ID Token ของ Cognito
   useEffect(() => {
     if (idToken) {
       try {
         const decoded = jwtDecode(idToken);
-        // ใช้ sub (subject) จาก Cognito เป็น owner_id
-        // sub คือ unique identifier ของ user ใน Cognito
         const userId = decoded.sub || decoded['cognito:username'] || userEmail;
         setOwnerId(userId);
         console.log('Owner ID from Cognito:', userId);
       } catch (error) {
         console.error('Error decoding token:', error);
-        // fallback ถ้า decode ไม่ได้
         setOwnerId(userEmail || '1');
       }
     } else {
-      // fallback ถ้าไม่มี idToken
       setOwnerId(userEmail || '1');
     }
   }, [idToken, userEmail]);
@@ -69,7 +70,7 @@ export default function NewDataset({ onComplete, onCancel, idToken, userEmail })
           name: datasetForm.name,
           description: datasetForm.description,
           source: datasetForm.source,
-          owner_id: ownerId // ใช้ owner_id ที่ได้จาก Cognito
+          owner_id: ownerId
         }),
       });
 
@@ -96,92 +97,86 @@ export default function NewDataset({ onComplete, onCancel, idToken, userEmail })
     }
   };
 
-const handleCreateLayer = async () => {
-  if (!layerForm.name.trim()) {
-    alert('Please enter layer name');
-    return;
-  }
+  const handleCreateLayer = async () => {
+    if (!layerForm.name.trim()) {
+      alert('Please enter layer name');
+      return;
+    }
 
-  setCreatingLayer(true);
+    setCreatingLayer(true);
 
-  // map type ที่ UI ใช้ -> PostgreSQL type ที่ Lambda ใช้ใน virtual view
-  const mapDataType = (type) => {
-    switch (type) {
-      case 'string':
-        return 'text';
-      case 'number':
-        return 'numeric';
-      case 'boolean':
-        return 'boolean';
-      case 'date':
-        return 'timestamp';
-      default:
-        return 'text';
+    const mapDataType = (type) => {
+      switch (type) {
+        case 'string':
+          return 'text';
+        case 'number':
+          return 'numeric';
+        case 'boolean':
+          return 'boolean';
+        case 'date':
+          return 'timestamp';
+        default:
+          return 'text';
+      }
+    };
+
+    try {
+      const response = await fetch(
+        `${DATA_API_URL}/datasets/${createdDatasetId}/layers`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${idToken}`,
+          },
+          body: JSON.stringify({
+            layer_name: layerForm.name,
+            title: layerForm.description || layerForm.name,
+            srid: 4326,
+            geom_type: layerForm.geom_type.toUpperCase(),
+            fields: layerForm.properties
+              .filter((p) => p.name.trim())
+              .map((p) => ({
+                field_name: p.name.trim(),
+                data_type: mapDataType(p.type),
+                unit: null,
+                description: null,
+              })),
+          }),
+        }
+      );
+
+      const text = await response.text();
+      console.log('create layer status:', response.status, 'body:', text);
+
+      if (!response.ok) {
+        let errorMessage = 'Failed to create layer';
+        try {
+          const errorData = JSON.parse(text);
+          errorMessage = errorData.message || errorMessage;
+        } catch {
+          errorMessage = text || errorMessage;
+        }
+        throw new Error(errorMessage);
+      }
+
+      const result = JSON.parse(text);
+
+      if (onComplete) {
+        onComplete({
+          datasetId: createdDatasetId,
+          datasetName: createdDatasetName,
+          layerId: result.layer_id || result.id,
+          layerName: layerForm.name,
+        });
+      }
+    } catch (error) {
+      console.error('Error creating layer:', error);
+      alert(`Failed to create layer: ${error.message}`);
+    } finally {
+      setCreatingLayer(false);
     }
   };
-
-  try {
-    const response = await fetch(
-      `${DATA_API_URL}/datasets/${createdDatasetId}/layers`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${idToken}`,
-        },
-        body: JSON.stringify({
-          // ให้ตรงกับ Lambda
-          layer_name: layerForm.name,
-          title: layerForm.description || layerForm.name,
-          srid: 4326, // หรือให้ผู้ใช้เลือกเพิ่มทีหลังก็ได้
-          geom_type: layerForm.geom_type.toUpperCase(), // "POINT", "LINESTRING", "POLYGON"
-          fields: layerForm.properties
-            .filter((p) => p.name.trim())
-            .map((p) => ({
-              field_name: p.name.trim(),
-              data_type: mapDataType(p.type),
-              // unit / description ตอนนี้ยังไม่มีใน UI เลยใส่ null ไปก่อน
-              unit: null,
-              description: null,
-            })),
-        }),
-      }
-    );
-
-    // debug: ดู error text ถ้าไม่ ok
-    const text = await response.text();
-    console.log('create layer status:', response.status, 'body:', text);
-
-    if (!response.ok) {
-      let errorMessage = 'Failed to create layer';
-      try {
-        const errorData = JSON.parse(text);
-        errorMessage = errorData.message || errorMessage;
-      } catch {
-        // ถ้า parse JSON ไม่ได้ ใช้ข้อความดิบจาก text
-        errorMessage = text || errorMessage;
-      }
-      throw new Error(errorMessage);
-    }
-
-    const result = JSON.parse(text);
-
-    if (onComplete) {
-      onComplete({
-        datasetId: createdDatasetId,
-        datasetName: createdDatasetName,
-        layerId: result.layer_id || result.id,
-        layerName: layerForm.name,
-      });
-    }
-  } catch (error) {
-    console.error('Error creating layer:', error);
-    alert(`Failed to create layer: ${error.message}`);
-  } finally {
-    setCreatingLayer(false);
-  }
-};
-
 
   const addProperty = () => {
     setLayerForm({
@@ -217,9 +212,11 @@ const handleCreateLayer = async () => {
                 ← Back to Map
               </button>
             )}
-            <h1 className="text-2xl font-bold">DataAPI - Create Dataset</h1>
+            {/* 🔥 เปลี่ยนชื่อ title ตามโหมด */}
+            <h1 className="text-2xl font-bold">
+              {existingDataset ? 'DataAPI - Add Layer' : 'DataAPI - Create Dataset'}
+            </h1>
           </div>
-          {/* แสดง user email ที่ login */}
           {userEmail && (
             <div className="text-sm text-blue-200">
               {userEmail}
@@ -233,34 +230,38 @@ const handleCreateLayer = async () => {
         <div className="bg-white rounded-xl shadow-2xl w-full">
           {/* Progress Indicator */}
           <div className="px-6 py-6 border-b bg-gradient-to-r from-gray-50 to-blue-50 rounded-t-xl">
-            <div className="flex items-center justify-center gap-4">
-              <div className="flex items-center gap-2">
-                <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold shadow-md ${
-                  step === 'dataset' ? 'bg-blue-900 text-white' : 'bg-green-500 text-white'
-                }`}>
-                  {step === 'dataset' ? '1' : '✓'}
+            {/* 🔥 ซ่อน progress indicator ถ้าเป็นโหมดเพิ่ม layer เดี่ยว */}
+            {!existingDataset && (
+              <div className="flex items-center justify-center gap-4">
+                <div className="flex items-center gap-2">
+                  <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold shadow-md ${
+                    step === 'dataset' ? 'bg-blue-900 text-white' : 'bg-green-500 text-white'
+                  }`}>
+                    {step === 'dataset' ? '1' : '✓'}
+                  </div>
+                  <span className={`font-semibold ${step === 'dataset' ? 'text-blue-900' : 'text-gray-600'}`}>
+                    Dataset
+                  </span>
                 </div>
-                <span className={`font-semibold ${step === 'dataset' ? 'text-blue-900' : 'text-gray-600'}`}>
-                  Dataset
-                </span>
-              </div>
 
-              <ChevronRight className="text-gray-400" size={20} />
+                <ChevronRight className="text-gray-400" size={20} />
 
-              <div className="flex items-center gap-2">
-                <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold shadow-md ${
-                  step === 'layer' ? 'bg-blue-900 text-white' : 'bg-gray-300 text-gray-600'
-                }`}>
-                  2
+                <div className="flex items-center gap-2">
+                  <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold shadow-md ${
+                    step === 'layer' ? 'bg-blue-900 text-white' : 'bg-gray-300 text-gray-600'
+                  }`}>
+                    2
+                  </div>
+                  <span className={`font-semibold ${step === 'layer' ? 'text-blue-900' : 'text-gray-500'}`}>
+                    Layer
+                  </span>
                 </div>
-                <span className={`font-semibold ${step === 'layer' ? 'text-blue-900' : 'text-gray-500'}`}>
-                  Layer
-                </span>
               </div>
-            </div>
+            )}
 
+            {/* 🔥 แสดงข้อมูล dataset เสมอเมื่ออยู่หน้า layer */}
             {step === 'layer' && (
-              <div className="mt-4 text-center">
+              <div className={`text-center ${existingDataset ? '' : 'mt-4'}`}>
                 <div className="inline-flex items-center gap-2 bg-blue-900 text-white px-4 py-2 rounded-lg text-sm font-semibold shadow-md">
                   <Database size={16} />
                   Dataset: {createdDatasetName}
@@ -431,12 +432,26 @@ const handleCreateLayer = async () => {
                 </div>
 
                 <div className="flex justify-between gap-3 pt-4">
-                  <button
-                    onClick={() => setStep('dataset')}
-                    className="px-6 py-3 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition"
-                  >
-                    Back
-                  </button>
+                  {/* 🔥 ซ่อนปุ่ม Back ถ้าเป็นโหมดเพิ่ม layer เดี่ยว */}
+                  {!existingDataset && (
+                    <button
+                      onClick={() => setStep('dataset')}
+                      className="px-6 py-3 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition"
+                    >
+                      Back
+                    </button>
+                  )}
+                  
+                  {/* 🔥 ถ้าเป็นโหมดเพิ่ม layer เดี่ยว ใส่ปุ่ม Cancel แทน */}
+                  {existingDataset && (
+                    <button
+                      onClick={onCancel}
+                      className="px-6 py-3 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition"
+                    >
+                      Cancel
+                    </button>
+                  )}
+                  
                   <button
                     onClick={handleCreateLayer}
                     disabled={creatingLayer}

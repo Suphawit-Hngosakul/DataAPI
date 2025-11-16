@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.17",
+    "h3-js": "^4.3.0",
     "leaflet": "^1.9.4",
     "lucide-react": "^0.553.0",
     "oidc-client-ts": "^3.3.0",

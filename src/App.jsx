@@ -1,17 +1,59 @@
-import React from "react";
+import React, { useState } from "react";
 import { useAuth } from "react-oidc-context";
 import { BrowserRouter as Router, Routes, Route, useNavigate } from "react-router-dom";
 
 import NewDataset from "./pages/NewDataset";
 import FrostThingCreator from "./pages/FrostThingCreator";
 import SoundMap from "./pages/SoundMap";
+import AddFeature from "./pages/AddFeature";
 
 function AuthenticatedApp({ auth, idToken, signOutRedirect }) {
   const navigate = useNavigate();
+  const [selectedDatasetForLayer, setSelectedDatasetForLayer] = useState(null);
+  const [selectedLayerForFeature, setSelectedLayerForFeature] = useState(null);
+
+  // Handler สำหรับการเพิ่ม layer ใน dataset ที่มีอยู่
+  const handleNavigateToNewLayer = (datasetInfo) => {
+    console.log('Navigate to new layer with:', datasetInfo);
+    setSelectedDatasetForLayer(datasetInfo);
+    navigate('/new-dataset');
+  };
+
+  // Handler สำหรับการเพิ่ม feature ใน layer ที่มีอยู่
+  const handleNavigateToAddFeature = (featureInfo) => {
+    console.log('Navigate to add feature with:', featureInfo);
+    setSelectedLayerForFeature(featureInfo);
+    navigate('/add-feature');
+  };
+
+  // Handler สำหรับ complete dataset/layer
+  const handleCompleteDataset = () => {
+    setSelectedDatasetForLayer(null);
+    navigate('/');
+  };
+
+  // Handler สำหรับ cancel dataset/layer
+  const handleCancelDataset = () => {
+    setSelectedDatasetForLayer(null);
+    navigate('/');
+  };
+
+  // Handler สำหรับ complete feature
+  const handleCompleteFeature = () => {
+    setSelectedLayerForFeature(null);
+    navigate('/');
+  };
+
+  // Handler สำหรับ cancel feature
+  const handleCancelFeature = () => {
+    setSelectedLayerForFeature(null);
+    navigate('/');
+  };
 
   return (
     <div className="w-full h-screen flex flex-col">
       <Routes>
+        {/* Main Map Route */}
         <Route 
           path="/" 
           element={
@@ -21,12 +63,19 @@ function AuthenticatedApp({ auth, idToken, signOutRedirect }) {
               onNavigateToHome={() => navigate('/')}
               onNavigateToMyThing={() => navigate('/things')}
               onNavigateToNewDevice={() => navigate('/create-thing')}
-              onNavigateToNewDataset={() => navigate('/new-dataset')}
+              onNavigateToNewDataset={() => {
+                setSelectedDatasetForLayer(null);
+                navigate('/new-dataset');
+              }}
+              onNavigateToNewLayer={handleNavigateToNewLayer}
+              onNavigateToAddFeature={handleNavigateToAddFeature}
               onNavigateToUpload={() => alert('Upload feature - coming soon')}
               signOutRedirect={signOutRedirect}
             />
           } 
         />
+
+        {/* Create Thing Route */}
         <Route 
           path="/create-thing" 
           element={
@@ -36,6 +85,8 @@ function AuthenticatedApp({ auth, idToken, signOutRedirect }) {
             />
           }
         />
+
+        {/* Things Route */}
         <Route 
           path="/things" 
           element={
@@ -45,19 +96,42 @@ function AuthenticatedApp({ auth, idToken, signOutRedirect }) {
               onNavigateToHome={() => navigate('/')}
               onNavigateToMyThing={() => navigate('/things')}
               onNavigateToNewDevice={() => navigate('/create-thing')}
+              onNavigateToNewDataset={() => {
+                setSelectedDatasetForLayer(null);
+                navigate('/new-dataset');
+              }}
+              onNavigateToNewLayer={handleNavigateToNewLayer}
+              onNavigateToAddFeature={handleNavigateToAddFeature}
               onNavigateToUpload={() => alert('Upload feature - coming soon')}
               signOutRedirect={signOutRedirect}
             />
           } 
         />
+
+        {/* New Dataset / Add Layer Route */}
         <Route 
           path="/new-dataset" 
           element={
             <NewDataset 
               idToken={idToken}
               userEmail={auth.user?.profile?.email || auth.user?.profile?.sub}
-              onCancel={() => navigate('/')}
-              onComplete={() => navigate('/')}
+              onCancel={handleCancelDataset}
+              onComplete={handleCompleteDataset}
+              existingDataset={selectedDatasetForLayer}
+            />
+          } 
+        />
+
+        {/* Add Feature Route */}
+        <Route 
+          path="/add-feature" 
+          element={
+            <AddFeature 
+              idToken={idToken}
+              userEmail={auth.user?.profile?.email || auth.user?.profile?.sub}
+              onCancel={handleCancelFeature}
+              onComplete={handleCompleteFeature}
+              {...selectedLayerForFeature}
             />
           } 
         />
@@ -79,6 +153,7 @@ function App() {
     )}`;
   };
 
+  // Loading State
   if (auth.isLoading) {
     return (
       <div className="w-full h-screen flex items-center justify-center bg-gray-50">
@@ -90,6 +165,7 @@ function App() {
     );
   }
 
+  // Error State
   if (auth.error) {
     return (
       <div className="w-full h-screen flex items-center justify-center bg-red-50">
@@ -107,6 +183,7 @@ function App() {
     );
   }
 
+  // Authenticated State
   if (auth.isAuthenticated) {
     const idToken = auth.user?.id_token;
 
@@ -121,6 +198,7 @@ function App() {
     );
   }
 
+  // Login Screen
   return (
     <div className="w-full h-screen flex items-center justify-center bg-gradient-to-br from-blue-500 to-blue-700">
       <div className="bg-white p-12 rounded-2xl shadow-2xl text-center max-w-md">
