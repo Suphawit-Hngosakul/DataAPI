@@ -1,0 +1,27 @@
+services:
+  frost-server:
+    image: fraunhoferiosb/frost-server:latest
+    container_name: frost-server
+    env_file:
+      - .env
+    ports:
+      - "8080:8080"
+      - "1883:1883"
+    depends_on:
+      - database
+
+  database:
+    image: postgis/postgis:16-3.4-alpine
+    container_name: frost-postgis
+    env_file:
+      - .env
+    volumes:
+      - postgis_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -d sensorthings -U sensorthings"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  postgis_data:
