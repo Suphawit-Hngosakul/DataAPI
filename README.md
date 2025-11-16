@@ -21,11 +21,11 @@ Then enter your real credentials
 #### NOTE: If you using Learner Lab account, Try using this command before continue. If not you can skip this part.
 
 ##### PowerShell
-```ps
-Set-Item -Path Env:AWS_ACCESS_KEY_ID -Value "<ACCESS_KEY>"
-Set-Item -Path Env:AWS_SECRET_ACCESS_KEY -Value "<SECRET_KEY>"
+```bash
+Set-Item -Path Env:AWS_ACCESS_KEY_ID -Value "<access_key>"
+Set-Item -Path Env:AWS_SECRET_ACCESS_KEY -Value "<secret_key>"
 Set-Item -Path Env:AWS_SESSION_TOKEN -Value 
-Set-Item -Path Env:AWS_DEFAULT_REGION -Value "<REGION>"
+Set-Item -Path Env:AWS_DEFAULT_REGION -Value "<region>"
 ```
 - Restart you cmd and run ``aws sts get-caller-identity``
 
@@ -42,9 +42,9 @@ This means you're now have authorized to do operations with **AWS Services** via
 ## STEP 3: Login to AWS Account
 - After you got the ``aws sts get-caller-identity`` response, run these following commands
 
-```ps
-$PASSWORD = aws ecr get-login-password --region <REGION>
-docker login --username AWS --password $PASSWORD "<ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com" 
+```bash
+$PASSWORD = aws ecr get-login-password --region <region>
+docker login --username AWS --password $PASSWORD "<account_id>.dkr.ecr.<region>.amazonaws.com" 
 ```
 If successful, you will get the response that look like this 
 ```bash
@@ -57,16 +57,16 @@ This means you've login to your ``AWS Account``
 - To create a repository in your ECR Service, run this command
 
 ```bash
-aws ecr create-repository --repository-name geoserver --region <REGION>
+aws ecr create-repository --repository-name geoserver --region <region>
 ```
 - After running the command, you'll get response like this
 ```bash
 {
     "repository": {
-        "repositoryArn": "arn:aws:ecr:<REGION>:<ACCOUNT_ID>:repository/geoserver",
-        "registryId": "<ACCOUNT_ID>",
+        "repositoryArn": "arn:aws:ecr:<region>:<account_id>:repository/geoserver",
+        "registryId": "<account_id>",
         "repositoryName": "geoserver",
-        "repositoryUri": "<ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com/geoserver",
+        "repositoryUri": "<account_id>.dkr.ecr.<region>.amazonaws.com/geoserver",
         "createdAt": "2025-11-16T03:46:00+00:00",
         "imageTagMutability": "MUTABLE",
         "imageScanningConfiguration": {
@@ -83,7 +83,7 @@ This means you've created a ECR repository
 ## STEP 5: Push GeoServer image to ECR Repository
 - To do so, run this command
 ```bash
-docker push "<ACCOUNT_IT>.dkr.ecr.<REGION>.amazonaws.com/geoserver:2.28.0"
+docker push "<ACCOUNT_IT>.dkr.ecr.<region>.amazonaws.com/geoserver:2.28.0"
 ```
 - It might take a few minutes to upload the image
 
