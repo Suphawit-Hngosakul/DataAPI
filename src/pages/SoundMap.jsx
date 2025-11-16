@@ -1,8 +1,7 @@
 import React, { useEffect, useState, useRef } from "react";
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
-import { Upload as UploadIcon, Database, Layers as LayersIcon, Filter, Home, List, ChevronRight, Plus, ChevronDown, ChevronUp, Trash2 } from 'lucide-react';
-import { latLngToCell, cellToBoundary } from 'h3-js';
+import { Upload as UploadIcon, Database, Layers as LayersIcon, Filter, Home, List, ChevronRight, Plus } from 'lucide-react';
 
 const FROST_API_URL = "https://dikn83u8md.execute-api.us-east-1.amazonaws.com/frost/get";
 const DATA_API_URL = "https://dporrqg75e.execute-api.us-east-1.amazonaws.com";
@@ -19,7 +18,7 @@ export default function SoundMap({
   signOutRedirect,
   onNavigateToNewDataset,
   onNavigateToNewLayer,
-  onNavigateToAddFeature
+  onNavigateToAddFeature // 🔥 เพิ่ม prop
 }) {
   const mapRef = useRef(null);
   const frostMarkers = useRef(new Map());
@@ -43,7 +42,6 @@ export default function SoundMap({
   const [selectedProject, setSelectedProject] = useState(null);
   const [layers, setLayers] = useState([]);
   const [selectedLayers, setSelectedLayers] = useState(new Set());
-  const [expandedLayers, setExpandedLayers] = useState(new Set());
   const [cqlFilter, setCqlFilter] = useState("");
   const [showProjectPanel, setShowProjectPanel] = useState(false);
   const [projectPanelCollapsed, setProjectPanelCollapsed] = useState(false);
@@ -51,20 +49,27 @@ export default function SoundMap({
   const [showCqlInput, setShowCqlInput] = useState(false);
   const [viewMode, setViewMode] = useState('list');
 
-  // 🔥 Delete Confirmation State
-  const [deleteConfirm, setDeleteConfirm] = useState({ show: false, type: null, id: null, name: null, featureIndex: null, layerId: null });
+  // === Initialize map with Layer Groups ===
+  useEffect(() => {
+    const map = L.map("map", {
+      zoomAnimation: true,
+      fadeAnimation: true,
+      markerZoomAnimation: true,
+    }).setView([13.7563, 100.5018], 13);
 
-  // 🔥 H3 Resolution Function - 8 ระดับ (7 hex + 1 point)
-  const getH3Resolution = (zoom) => {
-    if (zoom <= 6) return 1;
-    if (zoom <= 8) return 2;
-    if (zoom <= 10) return 3;
-    if (zoom <= 12) return 5;
-    if (zoom <= 14) return 6;
-    if (zoom <= 15) return 7;
-    if (zoom <= 17) return 8;
-    return 'points';
-  };
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: "© OpenStreetMap contributors",
+    }).addTo(map);
+
+    sensorLayerGroup.current = L.layerGroup().addTo(map);
+    projectLayerGroup.current = L.layerGroup();
+
+    mapRef.current = map;
+    setTimeout(() => map.invalidateSize(), 200);
+    
+    return () => map.remove();
+  }, []);
 
   // === Utility ===
   const isoToMs = (iso) => (iso ? Date.parse(iso) : 0);
@@ -102,448 +107,6 @@ export default function SoundMap({
     if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
     return d.toLocaleDateString("th-TH");
   };
-
-  // 🔥 ฟังก์ชัน Zoom ไปที่ Feature
-  const zoomToFeature = (feature) => {
-    if (!mapRef.current) return;
-    
-    try {
-      if (feature.geometry.type === 'Point') {
-        const [lon, lat] = feature.geometry.coordinates;
-        mapRef.current.setView([lat, lon], 18, { animate: true });
-      } else if (feature.geometry.type === 'LineString') {
-        const coords = feature.geometry.coordinates.map(c => [c[1], c[0]]);
-        const bounds = L.latLngBounds(coords);
-        mapRef.current.fitBounds(bounds, { padding: [50, 50], maxZoom: 16 });
-      } else if (feature.geometry.type === 'Polygon') {
-        const coords = feature.geometry.coordinates[0].map(c => [c[1], c[0]]);
-        const bounds = L.latLngBounds(coords);
-        mapRef.current.fitBounds(bounds, { padding: [50, 50], maxZoom: 16 });
-      } else if (feature.geometry.type === 'MultiPoint') {
-        const coords = feature.geometry.coordinates.map(c => [c[1], c[0]]);
-        const bounds = L.latLngBounds(coords);
-        mapRef.current.fitBounds(bounds, { padding: [50, 50], maxZoom: 16 });
-      } else if (feature.geometry.type === 'MultiLineString') {
-        const coords = feature.geometry.coordinates.flat().map(c => [c[1], c[0]]);
-        const bounds = L.latLngBounds(coords);
-        mapRef.current.fitBounds(bounds, { padding: [50, 50], maxZoom: 16 });
-      } else if (feature.geometry.type === 'MultiPolygon') {
-        const coords = feature.geometry.coordinates.flat(2).map(c => [c[1], c[0]]);
-        const bounds = L.latLngBounds(coords);
-        mapRef.current.fitBounds(bounds, { padding: [50, 50], maxZoom: 16 });
-      }
-    } catch (error) {
-      console.warn('Error zooming to feature:', error);
-    }
-  };
-
-  // 🔥 ฟังก์ชันลบ Feature
-  const deleteFeature = async (datasetId, layerId, featureIndex) => {
-    try {
-      const features = projectLayersRef.current.get(`${layerId}_features`);
-      if (!features || !features.features || !features.features[featureIndex]) {
-        console.error('Feature not found');
-        return;
-      }
-
-      const feature = features.features[featureIndex];
-      const featureId = feature.id || feature.properties?.id;
-
-      if (!featureId) {
-        console.error('Feature ID not found');
-        alert('Cannot delete feature: ID not found');
-        return;
-      }
-
-      // 🔥 ส่ง DELETE request ไป API
-      const response = await fetch(
-        `${DATA_API_URL}/datasets/${datasetId}/layers/${layerId}/features/${featureId}`,
-        {
-          method: 'DELETE',
-          headers: {
-            'Content-Type': 'application/json',
-          }
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error(`Failed to delete feature: ${response.status}`);
-      }
-
-      console.log('Feature deleted successfully');
-
-      // 🔥 Refresh layer data
-      const updatedFeatures = await fetchFeatures(datasetId, layerId, cqlFilter);
-      
-      if (updatedFeatures && projectLayerGroup.current) {
-        // Remove old layer
-        const oldLayer = projectLayersRef.current.get(layerId);
-        if (oldLayer) {
-          projectLayerGroup.current.removeLayer(oldLayer);
-        }
-
-        // Add updated layer
-        const currentZoom = mapRef.current.getZoom();
-        const resolution = getH3Resolution(currentZoom);
-        
-        let newLayer;
-        
-        if (resolution === 'points') {
-          newLayer = L.geoJSON(updatedFeatures, {
-            pointToLayer: (feature, latlng) => {
-              const props = feature.properties || {};
-              const value = parseFloat(props.noise_level || props.value || 0);
-              const color = colorByDb(value);
-              
-              return L.circleMarker(latlng, {
-                radius: 10,
-                fillColor: color,
-                color: "#FFFFFF",
-                weight: 2,
-                opacity: 1,
-                fillOpacity: 0.8
-              });
-            },
-            style: (feature) => {
-              const props = feature.properties || {};
-              const value = parseFloat(props.noise_level || props.value || 0);
-              const color = colorByDb(value);
-              
-              return {
-                color: color,
-                weight: 3,
-                opacity: 0.8,
-                fillColor: color,
-                fillOpacity: 0.4
-              };
-            },
-            onEachFeature: (feature, layer) => {
-              const props = feature.properties || {};
-              let popupContent = `<div class="font-sans text-sm"><b style="font-size: 16px; color: #1E3A8A;">Feature</b><br/><br/>`;
-              
-              const entries = Object.entries(props);
-              if (entries.length > 0) {
-                popupContent += '<div style="background: #f8fafc; padding: 8px; border-radius: 4px; margin: 4px 0;">';
-                entries.forEach(([key, value]) => {
-                  if (key !== 'id' && key !== 'geometry_name' && value != null) {
-                    popupContent += `<div style="margin: 4px 0;"><b style="color: #1E3A8A;">${key}:</b> <span style="color: #475569;">${value}</span></div>`;
-                  }
-                });
-                popupContent += '</div>';
-              }
-              
-              const geomType = feature.geometry?.type;
-              if (geomType) {
-                popupContent += `<div style="margin-top: 8px; padding: 4px 8px; background: #dbeafe; border-radius: 4px; display: inline-block;"><span style="font-size: 11px; color: #1e40af; font-weight: 600;">Type: ${geomType}</span></div>`;
-              }
-              
-              popupContent += '</div>';
-              layer.bindPopup(popupContent, { maxWidth: 300 });
-            }
-          });
-        } else {
-          newLayer = createH3HexLayer(updatedFeatures, resolution);
-        }
-        
-        newLayer.addTo(projectLayerGroup.current);
-        projectLayersRef.current.set(layerId, newLayer);
-        projectLayersRef.current.set(`${layerId}_features`, updatedFeatures);
-      }
-
-    } catch (error) {
-      console.error('Error deleting feature:', error);
-      alert('Failed to delete feature. Please try again.');
-    }
-  };
-
-  // 🔥 ฟังก์ชันลบ Layer
-  const deleteLayer = async (datasetId, layerId, layerName) => {
-    try {
-      // 🔥 ส่ง DELETE request ไป API
-      const response = await fetch(
-        `${DATA_API_URL}/datasets/${datasetId}/layers/${layerId}`,
-        {
-          method: 'DELETE',
-          headers: {
-            'Content-Type': 'application/json',
-          }
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error(`Failed to delete layer: ${response.status}`);
-      }
-
-      console.log('Layer deleted successfully');
-
-      // 🔥 Remove layer from map
-      const leafletLayer = projectLayersRef.current.get(layerId);
-      if (leafletLayer && projectLayerGroup.current) {
-        projectLayerGroup.current.removeLayer(leafletLayer);
-        projectLayersRef.current.delete(layerId);
-      }
-      projectLayersRef.current.delete(`${layerId}_features`);
-
-      // 🔥 Remove from selected layers
-      const newSelected = new Set(selectedLayers);
-      newSelected.delete(layerId);
-      setSelectedLayers(newSelected);
-
-      // 🔥 Remove from expanded layers
-      const newExpanded = new Set(expandedLayers);
-      newExpanded.delete(layerId);
-      setExpandedLayers(newExpanded);
-
-      // 🔥 Refresh layers list
-      await fetchLayers(datasetId);
-
-    } catch (error) {
-      console.error('Error deleting layer:', error);
-      alert('Failed to delete layer. Please try again.');
-    }
-  };
-
-  // 🔥 สร้าง H3 Hexagon Layer พร้อมแสดงจำนวนแบบสวยงาม
-  const createH3HexLayer = (features, resolution) => {
-    const hexData = new Map();
-    
-    features.features.forEach(feature => {
-      let coordinates = [];
-      
-      if (feature.geometry.type === 'Point') {
-        coordinates = [feature.geometry.coordinates];
-      } else if (feature.geometry.type === 'LineString') {
-        coordinates = feature.geometry.coordinates;
-      } else if (feature.geometry.type === 'Polygon') {
-        coordinates = feature.geometry.coordinates[0];
-      } else if (feature.geometry.type === 'MultiPoint') {
-        coordinates = feature.geometry.coordinates;
-      } else if (feature.geometry.type === 'MultiLineString') {
-        coordinates = feature.geometry.coordinates.flat();
-      } else if (feature.geometry.type === 'MultiPolygon') {
-        coordinates = feature.geometry.coordinates.flat(2);
-      }
-      
-      coordinates.forEach(coord => {
-        const [lon, lat] = coord;
-        
-        if (typeof lat !== 'number' || typeof lon !== 'number') return;
-        if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return;
-        
-        try {
-          const h3Index = latLngToCell(lat, lon, resolution);
-          
-          if (!hexData.has(h3Index)) {
-            hexData.set(h3Index, {
-              count: 0,
-              values: []
-            });
-          }
-          
-          const data = hexData.get(h3Index);
-          data.count++;
-          
-          const value = parseFloat(
-            feature.properties.noise_level || 
-            feature.properties.value || 
-            0
-          );
-          data.values.push(value);
-        } catch (error) {
-          console.warn('Invalid coordinates for H3:', lat, lon);
-        }
-      });
-    });
-    
-    console.log('Total features:', features.features.length);
-    console.log('Total hexagons created:', hexData.size);
-    
-    if (hexData.size === 0) {
-      console.warn('No valid hexagons created');
-      return L.featureGroup([]);
-    }
-    
-    const hexagons = [];
-    
-    hexData.forEach((data, h3Index) => {
-      try {
-        const boundary = cellToBoundary(h3Index);
-        const latLngs = boundary.map(coord => [coord[0], coord[1]]);
-        
-        const avgValue = data.values.reduce((sum, v) => sum + v, 0) / data.values.length;
-        const maxValue = Math.max(...data.values);
-        const minValue = Math.min(...data.values);
-        
-        const color = colorByDb(avgValue);
-        const opacity = Math.min(0.4 + (data.count * 0.05), 0.7);
-        
-        const hexagon = L.polygon(latLngs, {
-          color: color,
-          fillColor: color,
-          fillOpacity: opacity,
-          weight: 2,
-          opacity: 0.9
-        });
-        
-        // 🔥 เพิ่มตัวเลขบน Hexagon แบบสวยงาม
-        const center = hexagon.getBounds().getCenter();
-        const marker = L.marker(center, {
-          icon: L.divIcon({
-            className: 'hex-label-clean',
-            html: `<div style="
-              font-weight: bold;
-              font-size: 24px;
-              color: #1E3A8A;
-              text-shadow: 
-                -1px -1px 0 #fff,  
-                1px -1px 0 #fff,
-                -1px 1px 0 #fff,
-                1px 1px 0 #fff,
-                0 0 4px rgba(255,255,255,0.8);
-              pointer-events: none;
-              user-select: none;
-            ">${data.count}</div>`,
-            iconSize: [40, 40],
-            iconAnchor: [20, 20]
-          })
-        });
-        
-        hexagon.bindPopup(`
-          <div class="font-sans text-sm">
-            <b style="color: #1E3A8A; font-size: 16px;">Hexagon Statistics</b><br/>
-            <div style="margin-top: 8px; background: #f8fafc; padding: 8px; border-radius: 4px;">
-              <div style="margin: 4px 0;"><b style="color: #1E3A8A;">Count:</b> <span style="color: #475569;">${data.count} points</span></div>
-              <div style="margin: 4px 0;"><b style="color: #1E3A8A;">Average:</b> <span style="color: #475569;">${avgValue.toFixed(1)} dB</span></div>
-              <div style="margin: 4px 0;"><b style="color: #1E3A8A;">Min:</b> <span style="color: #475569;">${minValue.toFixed(1)} dB</span></div>
-              <div style="margin: 4px 0;"><b style="color: #1E3A8A;">Max:</b> <span style="color: #475569;">${maxValue.toFixed(1)} dB</span></div>
-            </div>
-          </div>
-        `, { maxWidth: 250 });
-        
-        hexagons.push(hexagon);
-        hexagons.push(marker);
-      } catch (error) {
-        console.warn('Error creating hexagon:', error);
-      }
-    });
-    
-    return L.featureGroup(hexagons);
-  };
-
-  // === Initialize map ONLY ===
-  useEffect(() => {
-    const map = L.map("map", {
-      zoomAnimation: true,
-      fadeAnimation: true,
-      markerZoomAnimation: true,
-    }).setView([13.7563, 100.5018], 13);
-
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      maxZoom: 19,
-      attribution: "© OpenStreetMap contributors",
-    }).addTo(map);
-
-    sensorLayerGroup.current = L.layerGroup().addTo(map);
-    projectLayerGroup.current = L.layerGroup();
-
-    mapRef.current = map;
-    setTimeout(() => map.invalidateSize(), 200);
-    
-    return () => map.remove();
-  }, []);
-
-  // === Zoom Event Handler ===
-  useEffect(() => {
-    if (!mapRef.current || dataType !== 'general') return;
-
-    const handleZoomEnd = () => {
-      const currentZoom = mapRef.current.getZoom();
-      const newResolution = getH3Resolution(currentZoom);
-      
-      selectedLayers.forEach(layerId => {
-        const features = projectLayersRef.current.get(`${layerId}_features`);
-        
-        if (!features) return;
-        
-        const oldLayer = projectLayersRef.current.get(layerId);
-        if (oldLayer && projectLayerGroup.current) {
-          projectLayerGroup.current.removeLayer(oldLayer);
-        }
-        
-        let newLayer;
-        
-        if (newResolution === 'points') {
-          newLayer = L.geoJSON(features, {
-            pointToLayer: (feature, latlng) => {
-              const props = feature.properties || {};
-              const value = parseFloat(props.noise_level || props.value || 0);
-              const color = colorByDb(value);
-              
-              return L.circleMarker(latlng, {
-                radius: 10,
-                fillColor: color,
-                color: "#FFFFFF",
-                weight: 2,
-                opacity: 1,
-                fillOpacity: 0.8
-              });
-            },
-            style: (feature) => {
-              const props = feature.properties || {};
-              const value = parseFloat(props.noise_level || props.value || 0);
-              const color = colorByDb(value);
-              
-              return {
-                color: color,
-                weight: 3,
-                opacity: 0.8,
-                fillColor: color,
-                fillOpacity: 0.4
-              };
-            },
-            onEachFeature: (feature, layer) => {
-              const props = feature.properties || {};
-              let popupContent = `<div class="font-sans text-sm"><b style="font-size: 16px; color: #1E3A8A;">Feature</b><br/><br/>`;
-              
-              const entries = Object.entries(props);
-              if (entries.length > 0) {
-                popupContent += '<div style="background: #f8fafc; padding: 8px; border-radius: 4px; margin: 4px 0;">';
-                entries.forEach(([key, value]) => {
-                  if (key !== 'id' && key !== 'geometry_name' && value != null) {
-                    popupContent += `<div style="margin: 4px 0;"><b style="color: #1E3A8A;">${key}:</b> <span style="color: #475569;">${value}</span></div>`;
-                  }
-                });
-                popupContent += '</div>';
-              }
-              
-              const geomType = feature.geometry?.type;
-              if (geomType) {
-                popupContent += `<div style="margin-top: 8px; padding: 4px 8px; background: #dbeafe; border-radius: 4px; display: inline-block;"><span style="font-size: 11px; color: #1e40af; font-weight: 600;">Type: ${geomType}</span></div>`;
-              }
-              
-              popupContent += '</div>';
-              layer.bindPopup(popupContent, { maxWidth: 300 });
-            }
-          });
-        } else {
-          newLayer = createH3HexLayer(features, newResolution);
-        }
-        
-        if (newLayer && projectLayerGroup.current) {
-          newLayer.addTo(projectLayerGroup.current);
-          projectLayersRef.current.set(layerId, newLayer);
-        }
-      });
-    };
-
-    mapRef.current.on('zoomend', handleZoomEnd);
-
-    return () => {
-      if (mapRef.current) {
-        mapRef.current.off('zoomend', handleZoomEnd);
-      }
-    };
-  }, [selectedLayers, dataType]);
 
   // === FROST Sensor Data Fetch ===
   useEffect(() => {
@@ -722,18 +285,6 @@ export default function SoundMap({
       }
       
       const response = await fetch(url);
-      const contentType = response.headers.get('content-type');
-      
-      if (!response.ok) {
-        console.error('API error:', response.status, response.statusText);
-        return null;
-      }
-      
-      if (contentType && contentType.includes('xml')) {
-        console.warn('API returned XML instead of JSON');
-        return null;
-      }
-      
       const data = await response.json();
       return data;
     } catch (error) {
@@ -801,27 +352,91 @@ export default function SoundMap({
         projectLayerGroup.current.removeLayer(leafletLayer);
         projectLayersRef.current.delete(layerId);
       }
-      projectLayersRef.current.delete(`${layerId}_features`);
     } else {
       newSelected.add(layerId);
       
       const features = await fetchFeatures(selectedProjectId, layerId, cqlFilter);
       
       if (features && features.features && features.features.length > 0 && projectLayerGroup.current) {
-        const currentZoom = mapRef.current.getZoom();
-        const resolution = getH3Resolution(currentZoom);
+        const geoJsonLayer = L.geoJSON(features, {
+          pointToLayer: (feature, latlng) => {
+            const props = feature.properties || {};
+            const value = parseFloat(props.noise_level || props.value || 0);
+            const color = colorByDb(value);
+            
+            return L.circleMarker(latlng, {
+              radius: 8,
+              fillColor: color,
+              color: "#FFFFFF",
+              weight: 2,
+              opacity: 1,
+              fillOpacity: 0.8
+            });
+          },
+          style: (feature) => {
+            return {
+              color: "#1E3A8A",
+              weight: 2,
+              opacity: 0.8,
+              fillColor: "#3B82F6",
+              fillOpacity: 0.4
+            };
+          },
+          onEachFeature: (feature, layer) => {
+            const props = feature.properties || {};
+            let popupContent = `<div class="font-sans text-sm"><b style="font-size: 16px; color: #1E3A8A;">Feature</b><br/><br/>`;
+            
+            const entries = Object.entries(props);
+            if (entries.length > 0) {
+              popupContent += '<div style="background: #f8fafc; padding: 8px; border-radius: 4px; margin: 4px 0;">';
+              entries.forEach(([key, value]) => {
+                if (key !== 'id' && key !== 'geometry_name' && value != null) {
+                  popupContent += `<div style="margin: 4px 0;"><b style="color: #1E3A8A;">${key}:</b> <span style="color: #475569;">${value}</span></div>`;
+                }
+              });
+              popupContent += '</div>';
+            }
+            
+            const geomType = feature.geometry?.type;
+            if (geomType) {
+              popupContent += `<div style="margin-top: 8px; padding: 4px 8px; background: #dbeafe; border-radius: 4px; display: inline-block;"><span style="font-size: 11px; color: #1e40af; font-weight: 600;">Type: ${geomType}</span></div>`;
+            }
+            
+            popupContent += '</div>';
+            layer.bindPopup(popupContent, { maxWidth: 300 });
+          }
+        }).addTo(projectLayerGroup.current);
         
-        let leafletLayer;
+        projectLayersRef.current.set(layerId, geoJsonLayer);
         
-        if (resolution === 'points') {
-          leafletLayer = L.geoJSON(features, {
+        const bounds = geoJsonLayer.getBounds();
+        if (bounds.isValid() && mapRef.current) {
+          mapRef.current.fitBounds(bounds, { padding: [50, 50] });
+        }
+      }
+    }
+    
+    setSelectedLayers(newSelected);
+  };
+
+  const applyCqlFilter = async () => {
+    for (const layerId of selectedLayers) {
+      const layer = layers.find(l => (l.layer_id || l.id) === layerId);
+      if (layer && projectLayerGroup.current) {
+        const existingLayer = projectLayersRef.current.get(layerId);
+        if (existingLayer) projectLayerGroup.current.removeLayer(existingLayer);
+        
+        const features = await fetchFeatures(selectedProjectId, layerId, cqlFilter);
+        
+        if (features && features.features && features.features.length > 0) {
+          const geoJsonLayer = L.geoJSON(features, {
             pointToLayer: (feature, latlng) => {
               const props = feature.properties || {};
               const value = parseFloat(props.noise_level || props.value || 0);
               const color = colorByDb(value);
               
               return L.circleMarker(latlng, {
-                radius: 10,
+                radius: 8,
                 fillColor: color,
                 color: "#FFFFFF",
                 weight: 2,
@@ -830,15 +445,11 @@ export default function SoundMap({
               });
             },
             style: (feature) => {
-              const props = feature.properties || {};
-              const value = parseFloat(props.noise_level || props.value || 0);
-              const color = colorByDb(value);
-              
               return {
-                color: color,
-                weight: 3,
+                color: "#1E3A8A",
+                weight: 2,
                 opacity: 0.8,
-                fillColor: color,
+                fillColor: "#3B82F6",
                 fillOpacity: 0.4
               };
             },
@@ -865,117 +476,9 @@ export default function SoundMap({
               popupContent += '</div>';
               layer.bindPopup(popupContent, { maxWidth: 300 });
             }
-          });
-        } else {
-          leafletLayer = createH3HexLayer(features, resolution);
-        }
-        
-        leafletLayer.addTo(projectLayerGroup.current);
-        projectLayersRef.current.set(layerId, leafletLayer);
-        projectLayersRef.current.set(`${layerId}_features`, features);
-        
-        try {
-          const bounds = leafletLayer.getBounds();
-          if (bounds && bounds.isValid() && mapRef.current) {
-            mapRef.current.fitBounds(bounds, { padding: [50, 50] });
-          }
-        } catch (error) {
-          console.warn('Error fitting bounds:', error);
-          if (features.features.length > 0) {
-            const firstFeature = features.features[0];
-            if (firstFeature.geometry.type === 'Point') {
-              const [lon, lat] = firstFeature.geometry.coordinates;
-              mapRef.current.setView([lat, lon], 14);
-            } else if (firstFeature.geometry.type === 'LineString') {
-              const [lon, lat] = firstFeature.geometry.coordinates[0];
-              mapRef.current.setView([lat, lon], 14);
-            } else if (firstFeature.geometry.type === 'Polygon') {
-              const [lon, lat] = firstFeature.geometry.coordinates[0][0];
-              mapRef.current.setView([lat, lon], 14);
-            }
-          }
-        }
-      }
-    }
-    
-    setSelectedLayers(newSelected);
-  };
-
-  const applyCqlFilter = async () => {
-    for (const layerId of selectedLayers) {
-      const layer = layers.find(l => (l.layer_id || l.id) === layerId);
-      if (layer && projectLayerGroup.current) {
-        const existingLayer = projectLayersRef.current.get(layerId);
-        if (existingLayer) projectLayerGroup.current.removeLayer(existingLayer);
-        
-        const features = await fetchFeatures(selectedProjectId, layerId, cqlFilter);
-        
-        if (features && features.features && features.features.length > 0) {
-          const currentZoom = mapRef.current.getZoom();
-          const resolution = getH3Resolution(currentZoom);
+          }).addTo(projectLayerGroup.current);
           
-          let geoJsonLayer;
-          
-          if (resolution === 'points') {
-            geoJsonLayer = L.geoJSON(features, {
-              pointToLayer: (feature, latlng) => {
-                const props = feature.properties || {};
-                const value = parseFloat(props.noise_level || props.value || 0);
-                const color = colorByDb(value);
-                
-                return L.circleMarker(latlng, {
-                  radius: 10,
-                  fillColor: color,
-                  color: "#FFFFFF",
-                  weight: 2,
-                  opacity: 1,
-                  fillOpacity: 0.8
-                });
-              },
-              style: (feature) => {
-                const props = feature.properties || {};
-                const value = parseFloat(props.noise_level || props.value || 0);
-                const color = colorByDb(value);
-                
-                return {
-                  color: color,
-                  weight: 3,
-                  opacity: 0.8,
-                  fillColor: color,
-                  fillOpacity: 0.4
-                };
-              },
-              onEachFeature: (feature, layer) => {
-                const props = feature.properties || {};
-                let popupContent = `<div class="font-sans text-sm"><b style="font-size: 16px; color: #1E3A8A;">Feature</b><br/><br/>`;
-                
-                const entries = Object.entries(props);
-                if (entries.length > 0) {
-                  popupContent += '<div style="background: #f8fafc; padding: 8px; border-radius: 4px; margin: 4px 0;">';
-                  entries.forEach(([key, value]) => {
-                    if (key !== 'id' && key !== 'geometry_name' && value != null) {
-                      popupContent += `<div style="margin: 4px 0;"><b style="color: #1E3A8A;">${key}:</b> <span style="color: #475569;">${value}</span></div>`;
-                    }
-                  });
-                  popupContent += '</div>';
-                }
-                
-                const geomType = feature.geometry?.type;
-                if (geomType) {
-                  popupContent += `<div style="margin-top: 8px; padding: 4px 8px; background: #dbeafe; border-radius: 4px; display: inline-block;"><span style="font-size: 11px; color: #1e40af; font-weight: 600;">Type: ${geomType}</span></div>`;
-                }
-                
-                popupContent += '</div>';
-                layer.bindPopup(popupContent, { maxWidth: 300 });
-              }
-            });
-          } else {
-            geoJsonLayer = createH3HexLayer(features, resolution);
-          }
-          
-          geoJsonLayer.addTo(projectLayerGroup.current);
           projectLayersRef.current.set(layerId, geoJsonLayer);
-          projectLayersRef.current.set(`${layerId}_features`, features);
         }
       }
     }
@@ -1368,66 +871,6 @@ export default function SoundMap({
     );
   };
 
-  // 🔥 Delete Confirmation Modal
-  const DeleteConfirmModal = () => {
-    if (!deleteConfirm.show) return null;
-
-    return (
-      <>
-        <div 
-          className="fixed inset-0 bg-black/50 z-[10001] transition-opacity"
-          onClick={() => setDeleteConfirm({ show: false, type: null, id: null, name: null, featureIndex: null, layerId: null })}
-        />
-        
-        <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-white rounded-xl shadow-2xl z-[10002] w-96 p-6">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center">
-              <Trash2 className="text-red-600" size={24} />
-            </div>
-            <div>
-              <h2 className="text-lg font-semibold text-gray-900">
-                Delete {deleteConfirm.type === 'feature' ? 'Feature' : 'Layer'}?
-              </h2>
-              <p className="text-sm text-gray-500">This action cannot be undone</p>
-            </div>
-          </div>
-
-          <div className="bg-gray-50 rounded-lg p-3 mb-4">
-            <p className="text-sm text-gray-700">
-              {deleteConfirm.type === 'feature' ? (
-                <>Are you sure you want to delete <strong>Feature #{deleteConfirm.featureIndex + 1}</strong>?</>
-              ) : (
-                <>Are you sure you want to delete layer <strong>{deleteConfirm.name}</strong>?</>
-              )}
-            </p>
-          </div>
-
-          <div className="flex gap-3">
-            <button
-              onClick={() => setDeleteConfirm({ show: false, type: null, id: null, name: null, featureIndex: null, layerId: null })}
-              className="flex-1 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg font-medium hover:bg-gray-300 transition"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={async () => {
-                if (deleteConfirm.type === 'feature') {
-                  await deleteFeature(selectedProjectId, deleteConfirm.layerId, deleteConfirm.featureIndex);
-                } else if (deleteConfirm.type === 'layer') {
-                  await deleteLayer(selectedProjectId, deleteConfirm.id, deleteConfirm.name);
-                }
-                setDeleteConfirm({ show: false, type: null, id: null, name: null, featureIndex: null, layerId: null });
-              }}
-              className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 transition"
-            >
-              Delete
-            </button>
-          </div>
-        </div>
-      </>
-    );
-  };
-
   // === UI ===
   return (
     <div className="w-full h-screen flex flex-col">
@@ -1440,6 +883,9 @@ export default function SoundMap({
           >
             DataAPI
           </h1>
+          
+          <div className="flex items-center gap-3">
+          </div>
         </div>
 
         <div className="flex gap-3 items-center">
@@ -1760,164 +1206,51 @@ export default function SoundMap({
                         <p className="text-sm text-gray-500 text-center py-4">No layers found</p>
                       ) : (
                         <div className="space-y-2 max-h-60 overflow-y-auto">
-                          {layers.map((layer) => {
-                            const layerId = layer.layer_id || layer.id;
-                            const isExpanded = expandedLayers.has(layerId);
-                            const features = projectLayersRef.current.get(`${layerId}_features`);
-                            
-                            return (
-                              <div
-                                key={layerId}
-                                className="rounded-lg border border-gray-200 transition"
-                              >
-                                <div className="p-3">
-                                  <div className="flex items-start gap-3">
-                                    <input
-                                      type="checkbox"
-                                      checked={selectedLayers.has(layerId)}
-                                      onChange={() => toggleLayer(layer)}
-                                      className="mt-1 w-4 h-4 text-[#1E3A8A] rounded focus:ring-[#1E3A8A]"
-                                    />
-                                    <div className="flex-1">
-                                      <div className="flex items-center justify-between">
-                                        <div className="font-medium text-sm text-gray-800">{layer.name}</div>
-                                        <div className="flex items-center gap-1">
-                                          {/* 🔥 ปุ่มลบ Layer */}
-                                          <button
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              setDeleteConfirm({
-                                                show: true,
-                                                type: 'layer',
-                                                id: layerId,
-                                                name: layer.name,
-                                                featureIndex: null,
-                                                layerId: null
-                                              });
-                                            }}
-                                            className="text-red-500 hover:bg-red-50 p-1 rounded transition"
-                                            title="Delete layer"
-                                          >
-                                            <Trash2 size={14} />
-                                          </button>
-                                          
-                                          {/* ปุ่ม Expand/Collapse */}
-                                          {selectedLayers.has(layerId) && features && (
-                                            <button
-                                              onClick={(e) => {
-                                                e.stopPropagation();
-                                                const newExpanded = new Set(expandedLayers);
-                                                if (isExpanded) {
-                                                  newExpanded.delete(layerId);
-                                                } else {
-                                                  newExpanded.add(layerId);
-                                                }
-                                                setExpandedLayers(newExpanded);
-                                              }}
-                                              className="text-[#1E3A8A] hover:bg-blue-50 p-1 rounded transition"
-                                            >
-                                              {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                                            </button>
-                                          )}
-                                        </div>
-                                      </div>
-                                      {layer.description && (
-                                        <div className="text-xs text-gray-500 mt-1">{layer.description}</div>
-                                      )}
-                                      <div className="text-xs text-gray-400 mt-1">
-                                        {layer.geom?.type || layer.geom_type || 'GEOMETRY'}
-                                        {layer.geom?.srid && ` (SRID: ${layer.geom.srid})`}
-                                      </div>
-                                      
-                                      {/* ปุ่ม Add Data */}
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          if (onNavigateToAddFeature) {
-                                            onNavigateToAddFeature({
-                                              datasetId: selectedProjectId,
-                                              datasetName: selectedProject?.name,
-                                              layerId: layerId,
-                                              layerName: layer.name,
-                                              layerSchema: layer.schema,
-                                              geomType: layer.geom?.type || layer.geom_type,
-                                              srid: layer.geom?.srid || 4326
-                                            });
-                                          }
-                                        }}
-                                        className="mt-2 inline-flex items-center gap-1 text-xs text-white bg-blue-600 hover:bg-blue-700 font-medium px-3 py-1.5 rounded transition"
-                                      >
-                                        <Plus size={12} />
-                                        Add Data
-                                      </button>
-                                    </div>
-                                  </div>
+                          {/* 🔥 เปลี่ยนโครงสร้าง layer item */}
+                          {layers.map((layer) => (
+                            <div
+                              key={layer.layer_id || layer.id}
+                              className="p-3 rounded-lg border border-gray-200 transition"
+                            >
+                              <div className="flex items-start gap-3">
+                                <input
+                                  type="checkbox"
+                                  checked={selectedLayers.has(layer.layer_id || layer.id)}
+                                  onChange={() => toggleLayer(layer)}
+                                  className="mt-1 w-4 h-4 text-[#1E3A8A] rounded focus:ring-[#1E3A8A]"
+                                />
+                                <div className="flex-1">
+                                  <div className="font-medium text-sm text-gray-800">{layer.name}</div>
+                                  {layer.description && <div className="text-xs text-gray-500 mt-1">{layer.description}</div>}
+                                  <div className="text-xs text-gray-400 mt-1">
+                                  {layer.geom?.type || layer.geom_type || 'GEOMETRY'} {/* 🔥 แก้ตรงนี้ */}
                                 </div>
-
-                                {/* 🔥 Feature List (Dropdown) - คลิกแล้ว Zoom + ปุ่มลบ */}
-                                {isExpanded && features && features.features && (
-                                  <div className="border-t border-gray-200 bg-gray-50 px-3 py-2 max-h-48 overflow-y-auto">
-                                    <div className="text-xs font-semibold text-gray-600 mb-2">
-                                      Features ({features.features.length})
-                                    </div>
-                                    {features.features.slice(0, 50).map((feature, idx) => (
-                                      <div
-                                        key={idx}
-                                        className="text-xs text-gray-700 py-2 px-2 border-b border-gray-200 last:border-0 hover:bg-blue-50 rounded transition flex items-start justify-between gap-2"
-                                      >
-                                        <div 
-                                          className="flex-1 cursor-pointer"
-                                          onClick={() => {
-                                            zoomToFeature(feature);
-                                          }}
-                                        >
-                                          <span className="font-medium text-blue-600">📍 Feature #{idx + 1}</span>
-                                          {feature.properties && Object.keys(feature.properties).length > 0 && (
-                                            <div className="ml-2 mt-1 text-gray-600">
-                                              {Object.entries(feature.properties)
-                                                .filter(([key]) => key !== 'id' && key !== 'geometry_name')
-                                                .slice(0, 3)
-                                                .map(([key, value]) => (
-                                                  <div key={key}>
-                                                    {key}: {String(value).substring(0, 30)}
-                                                    {String(value).length > 30 && '...'}
-                                                  </div>
-                                                ))
-                                              }
-                                            </div>
-                                          )}
-                                        </div>
-                                        
-                                        {/* 🔥 ปุ่มลบ Feature */}
-                                        <button
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            setDeleteConfirm({
-                                              show: true,
-                                              type: 'feature',
-                                              id: feature.id || feature.properties?.id,
-                                              name: null,
-                                              featureIndex: idx,
-                                              layerId: layerId
-                                            });
-                                          }}
-                                          className="text-red-500 hover:bg-red-100 p-1 rounded transition flex-shrink-0"
-                                          title="Delete feature"
-                                        >
-                                          <Trash2 size={14} />
-                                        </button>
-                                      </div>
-                                    ))}
-                                    {features.features.length > 50 && (
-                                      <div className="text-xs text-gray-500 italic mt-2">
-                                        ... and {features.features.length - 50} more features
-                                      </div>
-                                    )}
-                                  </div>
-                                )}
+                                  
+                                  {/* 🔥 เพิ่มปุ่ม Add Data */}
+                                  <button
+                                   type="button"
+                                   onClick={() => {
+                                   if (onNavigateToAddFeature) {
+                                   onNavigateToAddFeature({
+                                   datasetId: selectedProjectId,
+                                   datasetName: selectedProject?.name,
+                                   layerId: layer.layer_id || layer.id,
+                                   layerName: layer.name,
+                                   layerSchema: layer.schema,
+                                   geomType: layer.geom?.type || layer.geom_type,
+                                   srid: layer.geom?.srid || 4326
+                                       });
+                                     }
+                                   }}
+                                   className="mt-2 inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 hover:bg-blue-100 font-medium px-2 py-1 rounded transition"
+                                    >
+                                    <Plus size={12} />
+                                  Add Data
+                              </button>
+                                </div>
                               </div>
-                            );
-                          })}
+                            </div>
+                          ))}
                         </div>
                       )}
                     </div>
@@ -1981,9 +1314,6 @@ export default function SoundMap({
           idToken={idToken}
         />
       )}
-
-      {/* 🔥 Delete Confirmation Modal */}
-      <DeleteConfirmModal />
     </div>
   );
 }
